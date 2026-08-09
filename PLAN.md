@@ -319,6 +319,8 @@ Frontend(ABC) → TextualTui(全屏套壳)
 ### ✓ 阶段 5 · 注册表 + 可变区(原则 12)
 - [x] registry.py(Registry tool/prompt/skill + load_ext 容错) + default_registry 全局共享池
 - [x] Agent 加 registry 参数, _extra_tools += registry.tools()
+- [x] **集成闭环**(08-10 补): shell on_mount 调 `load_ext` + main agent 传 `default_registry` → ext/ tool 真正可用
+- [x] **ext/ 实例**: `web_search`(Bing 搜索, prism 自加) + `datetime_now`(当前时间) + `code-review` skill
 - [x] **验收**: ext/tools 丢 .py 已有 agent 能用;坏的跳过+emit
 
 ### ✓ 阶段 6 · 多 agent 工厂 + 工作区(原则 13/14)★

@@ -7,6 +7,7 @@ dependencies = [
     "ipython>=8.0",
     "openai>=1.0",
     "textual>=0.40",
+    "requests>=2.20",
 ]
 
 [project.optional-dependencies]

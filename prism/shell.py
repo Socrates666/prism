@@ -47,8 +47,8 @@ class PrismApp(App):
     def on_mount(self) -> None:
         from .agent import Agent
         from .model import OpenAIModel
+        from .registry import default_registry, load_ext
 
-        self.agent = Agent("main", model=OpenAIModel(), kind="main")
         log = self.query_one("#transcript", RichLog)
         app = self
 
@@ -99,11 +99,16 @@ class PrismApp(App):
                 flush_line()
                 app.call_from_thread(log.write, f"[yellow]⚠ patch {event.get('phase')}/{event.get('point')}: {event.get('error')} (已降级)[/yellow]")
 
-        self.agent.hooks["emit"] = emit
-        # 加载 slash 指令(ext/commands/, 扩展点)
+        # 加载 ext/(tools/prompts/patches/skills 进 default_registry, 容错) + slash 指令
         from .commands import load_commands
+        load_ext("ext", default_registry, emit=emit)
         self.commands = load_commands("ext", emit=emit)
+        # 建 main agent(接 registry → ext/ 的 tool 可用, 如 web_search)
+        self.agent = Agent("main", model=OpenAIModel(), kind="main", registry=default_registry)
+        self.agent.hooks["emit"] = emit
         log.write("[bold]prism[/bold] — 全屏 TUI(抄 pi transcript+dock)\n")
+        if default_registry.tools():
+            log.write("工具: " + "  ".join(f"[cyan]{t.name}[/]" for t in default_registry.tools()) + "\n")
         if self.commands:
             log.write("指令: " + "  ".join(f"[cyan]/{n}[/]" for n in sorted(self.commands)) + "\n")
         log.write("输入 [cyan]@agent 消息[/] 对话, 或直接 Python 代码。Ctrl+C 退出。\n\n")
