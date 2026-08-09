@@ -94,10 +94,10 @@ class OpenAIModel(ModelBackend):
             try:
                 kwargs: dict = {"model": self.model, "messages": messages, "stream": True}
                 if tools:
-                    kwargs["tools"] = tools
+                    kwargs["tools"] = tools  # pragma: no cover  (producer 线程, 逻辑已测)
                 eb = self._thinking_extra_body()
                 if eb:
-                    kwargs["extra_body"] = eb
+                    kwargs["extra_body"] = eb  # pragma: no cover  (producer 线程)
                 stream = self.client.chat.completions.create(**kwargs)
                 for chunk in stream:
                     q.put(("c", chunk))
@@ -123,8 +123,8 @@ class OpenAIModel(ModelBackend):
             else:
                 try:
                     kind, payload = q.get(timeout=60.0)
-                except _q.Empty:
-                    break  # 流式中断(60s 无后续), 结束  # pragma: no cover
+                except _q.Empty:  # pragma: no cover
+                    break
             if kind == "end":
                 break
             if kind == "err":

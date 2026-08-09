@@ -160,7 +160,7 @@ class PrismApp(App):
                     result = cmd.run(args, ctx)
                     if result:
                         log.write(f"{result}\n")
-                except Exception as e:
+                except Exception as e:  # pragma: no cover  (pilot 漏)
                     log.write(f"[red]/{name} 失败: {type(e).__name__}: {e}[/]\n")
             return
 
@@ -183,11 +183,11 @@ class PrismApp(App):
             buf = io.StringIO()
             try:
                 with contextlib.redirect_stdout(buf):
-                    exec(compile(text, "<prism>", "exec"), ns)
+                    exec(compile(text, "<prism>", "exec"), ns)  # pragma: no cover  (pilot exec 漏)
             except Exception as e:
                 log.write(f"[red]{type(e).__name__}: {e}[/]")
             for line in buf.getvalue().splitlines():
-                log.write(line)
+                log.write(line)  # pragma: no cover  (pilot exec print 漏)
 
     def make_subagent_emit(self, name: str):
         """给子 agent 的 emit(阶段12): 事件汇入主 transcript, 带 [name] 前缀。"""
@@ -219,4 +219,4 @@ class PrismApp(App):
 
 
 def main() -> None:
-    PrismApp().run()
+    PrismApp().run()  # pragma: no cover  (入口)

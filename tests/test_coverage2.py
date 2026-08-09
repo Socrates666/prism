@@ -271,3 +271,34 @@ def test_tui_empty_input_noop():
             await pilot.pause()
             assert pilot.app.is_running
     asyncio.run(run())
+
+
+def test_tui_python_exec_error_shown():
+    from prism.shell import PrismApp
+    from textual.widgets import Input
+
+    async def run():
+        async with PrismApp().run_test() as pilot:
+            app = pilot.app
+            app.call_from_thread = lambda *a, **k: None
+            dock = app.query_one("#dock", Input)
+            dock.value = "1/0"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.is_running
+    asyncio.run(run())
+
+
+def test_load_commands_skips_underscore(tmp_path):
+    from prism.commands import load_commands
+    (tmp_path / "commands").mkdir()
+    (tmp_path / "commands" / "_skip.py").write_text("NAME='x'\ndef run(a,c):return 1\n")
+    assert load_commands(tmp_path) == {}
+
+
+def test_load_ext_skips_underscore(tmp_path):
+    from prism.registry import Registry, load_ext
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "_skip.py").write_text(
+        "from prism.agent_loop import Tool\ndef register(r): r.tool(Tool('x','', {'type':'object','properties':{}}, lambda a:1))\n")
+    assert load_ext(tmp_path, Registry()) == []

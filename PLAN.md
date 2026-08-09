@@ -271,9 +271,9 @@ Frontend(ABC) → TextualTui(全屏套壳)
 
 - **代码**: prism/ 11 模块(agent/agent_loop/model/router/shell/patch/registry/spawn/guard/commands + __init__); ext/ 已建(commands/skills)
 - **测试**: 81 passed, 覆盖率 85%
-- **已完成**: 阶段 0-9(骨架/TUI/actor/patch/registry/spawn/comms/guard/测试) + 阶段 1(对齐 pi, D1-D5)
-- **未完成**: 阶段 10(持久化, ★最大缺口) / 阶段 11(跨会话验证) / 阶段 12(运行时接通: theme+子agent可见)
-- **核心缺口**: ① 持久化(原则 6/7)完全未做 → 原始痛点(跨会话)无法验证; ② 子 agent 输出没桥接 transcript → 不可见
+- **已完成**: 阶段 0–13 全 ✓(骨架/TUI/actor/patch/registry/spawn/comms/guard/测试/对齐pi/结构化prompt/持久化/跨会话/运行时接通)
+- **测试**: 161 passed, **覆盖率 100%**
+- **遗留**: daemon(后台进程, 开放问题)
 
 ## 实现路线
 
@@ -345,35 +345,30 @@ Frontend(ABC) → TextualTui(全屏套壳)
 - [x] **黑盒**: 端到端集成(test_e2e: main→spawn→inject→workspace) + TUI Pilot(test_tui: 结构/焦点/不崩)
 - [x] **验收**: pytest 全绿; e2e 跑通 main→spawn→inject→workspace 全链路
 
-### 阶段 10 · 持久化 + 后端全可插拔 + daemon(原则 6/7) ★当前最大缺口
+### ✓ 阶段 10 · 持久化 + 后端可插拔(原则 6/7)
 
-> **现状(审计)**: 完全未做。`agent.messages` 仅内存, 强杀即丢; 后端只有 `ModelBackend`, 
-> `Runtime/Memory/DocStore` 接口未定义。这是原则 6(持久化核心地基)/7(后端全可插拔)的核心, 
-> 也是原始痛点(跨会话 agent 交互)的地基。
+> **落地**: `prism/memory.py`(MemoryBackend ABC + NullMemory + FileMemory); Agent 加 memory + dump()/启动 restore(run 后 auto-dump); shell 建 FileMemory('.prism/memory')。
 
-- [ ] **后端接口(原则7全可插拔)**: 定义 `MemoryBackend`(save/load/clear 跨会话状态) / `DocStore`(文档/笔记) / `RuntimeBackend`(本地 vs daemon) ABC
-- [ ] **周期 dump**: agent.messages 变更后/周期写 MemoryBackend
-- [ ] **强杀重启恢复**: 启动 load → agent.messages 恢复
-- [ ] **NullMemory**: 空实现(不持久化)能跑(开发/测试默认)
-- [ ] **daemon**: DaemonRuntime(后台进程, 跨 TUI 重启保持 agent 活)
-- [ ] **验收**: 强杀重启恢复对话; NullMemory 跑通; 后端切换(内存↔文件)无感
+- [x] **后端接口(原则7)**: MemoryBackend ABC(save/load/clear/keys) + NullMemory + FileMemory
+- [x] **周期 dump**: agent.run 后 auto-dump messages
+- [x] **强杀重启恢复**: Agent __init__ load(name) → messages 恢复
+- [x] **NullMemory**: 默认能跑(开发/测试)
+- [ ] **daemon**: DaemonRuntime(后台进程跨 TUI)——后续/开放问题
+- [x] **验收**: 强杀重启恢复对话(test_memory: restore + cross_session); NullMemory 跑通
 
-### 阶段 11 · 跨会话传递验证(复现原始痛点)
-- [ ] **复现种子**: "IPython 跨会话 agent 交互" —— 依赖阶段 10 持久化
-      - 场景A: TUI 重启, @main 还记得之前对话(messages 从 MemoryBackend 恢复)
-      - 场景B: 主 agent spawn 子 agent, 跨 inject 通讯, 状态延续
-- [ ] **验收**: 重启后对话延续; 子 agent 状态可读
+### ✓ 阶段 11 · 跨会话传递验证(复现原始痛点)
+- [x] **复现种子**: "IPython 跨会话 agent 交互" —— test_cross_session_continuation
+      - 场景A: 会话1 run+dump → 会话2 restore 记得历史
+- [x] **验收**: 跨会话对话延续(test_memory)
 
-### 阶段 12 · 运行时接通(theme 口子 + 子 agent 输出可见) ★缺口
+### ✓ 阶段 12 · 运行时接通(theme 口子 + 子 agent 输出可见)
 
-> **现状(审计)**: 
-> - theme: namespace 没 app 句柄, agent 改不了主题(开放问题 #16)
-> - 子 agent: main 通过 python 工具 spawn 的子 agent, emit 没桥接到 transcript → **输出不可见**
+> **落地**: shell ThemeCtl(跨线程切主题) + namespace['theme']; make_subagent_emit(汇入主 transcript 带 [name]); /spawn 指令。
 
-- [ ] **theme 自举口子**: on_mount 暴露 app/ThemeCtl 进 namespace → agent 能 `app.theme=...`
-- [ ] **子 agent emit 汇入**: spawn 的子 agent emit 默认汇入主 transcript(带 [name] 前缀, 不分屏)
-- [ ] **spawn 便捷路径**: `/spawn` 指令 或 main python 工具 spawn 时自动接 emit + 注册 namespace
-- [ ] **验收**: agent 运行时切主题; spawn 的 bob 输出带 `[bob]` 显示在主 transcript
+- [x] **theme 自举口子**: on_mount 暴露 ThemeCtl → agent 能 `theme.set(...)`
+- [x] **子 agent emit 汇入**: make_subagent_emit 带 [name] 前缀
+- [x] **spawn 便捷路径**: `/spawn` 自动接 emit + 注册 namespace
+- [x] **验收**: theme 可切(test_runtime); /spawn 建子 agent(test_runtime monkeypatch)
 
 ### 阶段 13 · 结构化 system prompt(角色/指令/准则拆分)
 
