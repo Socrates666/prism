@@ -10,6 +10,26 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
+
+def _load_env():
+    """读 prism 目录的 .env 填进 os.environ(不覆盖已有)。让 .env 里的 key/url/model 自动生效。"""
+    import os
+    from pathlib import Path
+    env = Path(__file__).resolve().parent.parent / ".env"
+    if not env.exists():
+        return
+    for line in env.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k, v = k.strip(), v.strip()
+        if k and k not in os.environ:
+            os.environ[k] = v
+
+
+_load_env()
+
 from .agent import Agent
 from .model import ModelBackend, OpenAIModel
 
