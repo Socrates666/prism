@@ -80,6 +80,9 @@ class PrismApp(App):
             elif t == "error":
                 flush_line()
                 app.call_from_thread(log.write, f"[red]error: {event.get('error')}[/red]")
+            elif t == "patch_error":
+                flush_line()
+                app.call_from_thread(log.write, f"[yellow]⚠ patch {event.get('phase')}/{event.get('point')}: {event.get('error')} (已降级)[/yellow]")
 
         self.agent.hooks["emit"] = emit
         log.write("[bold]prism[/bold] — 全屏 TUI(抄 pi transcript+dock)\n")

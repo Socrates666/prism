@@ -13,6 +13,7 @@ import queue
 from typing import Callable
 
 from .agent_loop import run_agent_loop, Tool
+from .patch import PatchRegistry
 
 
 def _user_ns() -> dict:
@@ -91,6 +92,7 @@ class Agent:
         self.last_result: str = ""
         self.history: list[dict] = []
         self.hooks: dict[str, Callable] = {"emit": _default_emit}
+        self.patches = PatchRegistry(self.emit)   # 五扩展点 patch 注册表(原则 11)
         self.abort = threading.Event()
         self._extra_tools: list[Tool] = list(tools or [])
         self.workspace = None             # 子 agent 由 spawn 设(原则14)
@@ -124,7 +126,8 @@ class Agent:
         self.emit({"type": "user_input", "text": user_input})
         msgs = run_agent_loop(
             self.model, self.system_prompt, user_input, self._tools(),
-            self.emit, abort=self.abort, max_turns=self.max_turns, history=self.history,
+            self.emit, abort=self.abort, max_turns=self.max_turns,
+            history=self.history, patches=self.patches,
         )
         for m in reversed(msgs):
             if m.get("role") == "assistant" and m.get("content"):
