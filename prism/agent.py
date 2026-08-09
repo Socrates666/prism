@@ -110,9 +110,18 @@ class Agent:
         self.hooks["emit"](event)
 
     def execute(self, code: str) -> tuple[str, str]:
-        """在共享命名空间执行 Python(python 工具底层)。"""
+        """在共享命名空间执行 Python(python 工具底层)。
+
+        护栏(原则 2/10): open 写 prism/ 核心 → PermissionError; 其余正常。
+        """
         try:
-            exec(compile(code, f"<{self.name}>", "exec"), self.namespace)
+            from .guard import restricted_builtins
+            glb = dict(self.namespace)
+            glb.pop("__builtins__", None)
+            glb["__builtins__"] = restricted_builtins()
+            exec(compile(code, f"<{self.name}>", "exec"), glb)
+            glb.pop("__builtins__", None)
+            self.namespace.update(glb)   # 同步新建变量回共享 namespace
             return ("ok", "")
         except Exception as e:
             return ("error", f"{type(e).__name__}: {e}")
@@ -122,6 +131,17 @@ class Agent:
         if self.kind == "main":
             return [_python_tool(self)] + self._extra_tools
         return list(self._extra_tools)    # 子 agent 无裸 exec
+
+    # ── 增量扩建自我修复(原则 7/10, 走注册表正道) ────────
+    def add_patch(self, point: str, fn, *, kind: str = "around") -> None:
+        """运行时注册 patch(增量扩建正道)。kind ∈ before/after/around。"""
+        if kind not in ("before", "after", "around"):
+            raise ValueError(f"kind 须 before/after/around, 不是 '{kind}'")
+        getattr(self.patches, kind)(point, fn)
+
+    def add_tool(self, tool) -> None:
+        """运行时加 tool(增量扩建正道)。"""
+        self._extra_tools.append(tool)
 
     def run(self, user_input: str) -> None:
         """同步 function-calling loop(前台)。返回 None, 显示靠 emit, 结果在 last_result。"""
