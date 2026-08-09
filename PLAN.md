@@ -231,6 +231,19 @@ Frontend(ABC) → TextualTui(全屏套壳)
 注册表: Registry(tools/prompts/skills) + PatchRegistry
 ```
 
+### Theme / 配色落点(原则 9 + 10 + 12)
+
+**当前唯一硬编码点**: `prism/shell.py` 顶部 `CSS` 常量(transcript 边框 `$accent` / dock 边框 `$primary` + `:focus $accent`)。`$accent`/`$primary` 是 textual 设计 token, 跟 textual 内置主题绑定。textual 本身支持运行时切主题(`self.theme="nord"` 立即生效, 所有 `$accent` 变量跟着变), 但 prism 还没接它。
+
+**Gap(2026-08-09 发现)**: 按"显示自举"(原则 9)+ 主 agent 完整 IPython(原则 13), agent 应能运行时改主题。但当前 TUI 模式 `Agent(namespace=_user_ns())` 时 `get_ipython()` 返回 None → namespace 只有 `{"main": agent}`; `on_mount` 里 `app=self` 是局部变量(只供 emit 闭包用), **没进 namespace** → agent 的 python 工具 exec `app.theme=...` 会 NameError。app 句柄没暴露, 主题自举这条路是断的。
+
+**补法(按糙→正)**:
+1. 糙版: `on_mount` 加 `self.agent.namespace["app"] = self`, dock 里 `app.theme="nord"` 立刻能切。符合原则 13(主 agent = 用户等价, 用户本就能 Ctrl+C 改 CSS)。
+2. 干净版: 包 `ThemeCtl`(只暴露 set/register, 不暴露整个 app) 进 namespace。
+3. 架构正: 配色走 **ext/ 可变区**(原则 12)+ textual `register_theme`, CSS 全用 `$accent` 这类变量, 切主题零改 CSS、不碰 prism/ 核心(原则 10 immutable)。
+
+**注意**: theme 是 textual App 层状态(`self.theme`/CSS), 不是 agent `hooks["emit"]`(原则 9 hooks 只管事件渲染)能管的。改主题需要 App 句柄, 跟"显示自举"的 hooks 是两条路。
+
 ---
 
 ## prime-agent 翻译 / 借鉴记录
@@ -259,17 +272,20 @@ Frontend(ABC) → TextualTui(全屏套壳)
 ### ✓ 阶段 0 · 骨架 + 本地内核 + REPL + function-calling loop
 - [x] agent_loop.py(function calling + 事件流)/ model.py(chat_stream)/ @ 路由 / .env
 
-### 阶段 1 · textual TUI 套壳(原则 8 升级)
-- [ ] textual 全屏 TUI(输入/输出/状态 面板)
-- [ ] @ 路由挪进 TUI 输入
-- [ ] **验收**: TUI 跑, @alice 对话, 输出分屏
+### ✓ 阶段 1 · textual TUI 套壳(原则 8 升级)
+- [x] textual 全屏 TUI(transcript + dock, 抄 pi)
+- [x] @ 路由挪进 TUI 输入(单行 @name → inject)
+- [x] transcript can_focus=False(点击不抢 Input 焦点)
+- [ ] **遗留**: theme 口子——namespace 未暴露 app 句柄, agent 够不到 self.theme(见 Theme 节)
+- [ ] **未做**: 多 agent 输出分屏(等阶段 5+)
+- [x] **验收**: TUI 跑, @main 对话, 流式输出(分屏待多 agent)
 
-### 阶段 2 · actor 异步(原则 15)
-- [ ] Agent 线程 + inbox + inject
-- [ ] agent emit 跨线程到 TUI(call_from_thread)
-- [ ] **验收**: 主 agent run 不冻 TUI; inject 递条子 agent 处理
+### ✓ 阶段 2 · actor 异步(原则 15)
+- [x] Agent 线程 + inbox + inject
+- [x] agent emit 跨线程到 TUI(call_from_thread)
+- [x] **验收**: 主 agent run 不冻 TUI; inject 递条子 agent 处理(跨 agent inject 待阶段 6)
 
-### 阶段 3 · 扩展点 patch(原则 11)
+### ▶ 阶段 3 · 扩展点 patch(原则 11) ← 当前
 - [ ] patch.py(PatchRegistry before/after/around + 异常降级)
 - [ ] agent_loop 五点 patchable
 - [ ] **验收**: around patch 包裹 execute_tools 改行为,不改 base
@@ -311,6 +327,7 @@ Frontend(ABC) → TextualTui(全屏套壳)
 13. **子 agent python 工具裸 open**(若未来赋予):落 cwd=根,踩踏。当前子 agent 无 python 工具,无此问题;若赋予,上 chdir 锁
 14. **inbox 通讯 vs 共享变量**:通讯主走 inject(安全),共享变量辅助(eventual + 加锁)
 15. **子 agent workspace 清理**:子 agent 结束后 workspaces/<name>/ 保留还是清理?待定
+16. **theme namespace gap**:TUI 模式 namespace 没 app 句柄, agent 运行时改不了主题(见 Theme 节)。补法已定, 待实现
 
 ---
 
