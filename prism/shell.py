@@ -11,6 +11,16 @@ from textual.app import App, ComposeResult
 from textual.widgets import Header, Input, RichLog
 
 
+class Transcript(RichLog):
+    """transcript 显示区。can_focus=False: 点击它不抢 Input 焦点。
+
+    RichLog 默认 can_focus=True —— 鼠标点击 transcript 会把焦点从输入框
+    抢走, 导致键盘输入丢失、:focus 边框消失(用户报"点击后失效")。
+    transcript 是只读显示区, 不需要焦点, 关掉即可。
+    """
+    can_focus = False
+
+
 CSS = """
 Screen { layout: vertical; }
 #transcript { height: 1fr; border: solid $accent; padding: 0 1; }
@@ -30,7 +40,7 @@ class PrismApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        yield RichLog(id="transcript", wrap=True, markup=True)
+        yield Transcript(id="transcript", wrap=True, markup=True)
         yield Input(id="dock", placeholder="@agent 消息   或   Python 代码")
 
     def on_mount(self) -> None:
