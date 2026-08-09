@@ -52,8 +52,8 @@ RuntimeBackend / MemoryBackend / DocStore / ModelBackend 全可换。
 ### 原则 11 · 扩展点 patch(before/after/around)
 agent_loop 五点 patchable(build_messages / stream_response / execute_tools / should_stop / emit)。每点支持 before/after/around。patch 注册进 PatchRegistry,不改 base。
 
-### 原则 12 · 可变区 = 人格插件(全局共享非单例,热插拔)
-`ext/` 是 agent 人格插件:定义全局共享(注册表池),每 agent 各自实例(非单例),热插拔,容错降级。
+### 原则 12 · 可变区 = 人格插件(ext/ 四类: tools/prompts/patches/skills)
+`ext/` 是 agent 人格插件 —— **tools/prompts/patches/skills 四类共同构成 agent 人格**(不是专门一个叫'人格'的东西)。全局共享(注册表池),每 agent 各自实例(非单例),热插拔,容错降级。agent 配置(prompt 段/tools/patches/skills)由这四类外部管理,不硬编码在 prism/ base(原则 10)。
 
 ### 原则 13 · 能力分层(主 agent 完整 / 子 agent 工厂受限)★多agent
 - **主 agent**:享**完整 IPython 工具**(python 工具 = exec 任意代码),工作区=根(cwd),共享命名空间,跟用户等价。是用户的一等公民延伸,能 spawn 子 agent。
