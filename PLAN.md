@@ -285,10 +285,11 @@ Frontend(ABC) → TextualTui(全屏套壳)
 - [x] agent emit 跨线程到 TUI(call_from_thread)
 - [x] **验收**: 主 agent run 不冻 TUI; inject 递条子 agent 处理(跨 agent inject 待阶段 6)
 
-### ▶ 阶段 3 · 扩展点 patch(原则 11) ← 当前
-- [ ] patch.py(PatchRegistry before/after/around + 异常降级)
-- [ ] agent_loop 五点 patchable
-- [ ] **验收**: around patch 包裹 execute_tools 改行为,不改 base
+### ✓ 阶段 3 · 扩展点 patch(原则 11)
+- [x] patch.py(PatchRegistry before/after/around + 异常降级)
+- [x] agent_loop 五点 patchable(build_messages/stream_response/execute_tools/should_stop/emit)
+- [x] Agent 持有 patches; TUI 显示 patch_error 降级
+- [x] **验收**: around patch 包裹 execute_tools 改行为(15 测试绿),不改 base(patches 缺省 no-op)
 
 ### 阶段 4 · 注册表 + 可变区(原则 12)
 - [ ] registry.py + ext/ 容错加载
