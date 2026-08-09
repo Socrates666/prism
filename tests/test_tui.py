@@ -55,3 +55,56 @@ def test_tui_empty_at_message_no_crash():
             await pilot.pause()
             assert pilot.app.is_running
     asyncio.run(run())
+
+
+class FakeModel:
+    def __init__(self, script): self.script = list(script); self.i = 0
+    def chat_stream(self, m, tools=None):
+        text, tcs = self.script[self.i]; self.i += 1
+        if text: yield {"type": "delta", "text": text}
+        yield {"type": "done", "tool_calls": tcs or []}
+
+
+def test_tui_slash_model_switches():                          # /model 触发 + 状态变
+    async def run():
+        async with PrismApp().run_test() as pilot:
+            dock = pilot.app.query_one("#dock", Input)
+            dock.value = "/model glm-4.7"
+            await pilot.press("enter"); await pilot.pause()
+            assert pilot.app.agent.model.model == "glm-4.7"
+    asyncio.run(run())
+
+
+def test_tui_slash_thinking_off():                            # /thinking off 触发
+    async def run():
+        async with PrismApp().run_test() as pilot:
+            dock = pilot.app.query_one("#dock", Input)
+            dock.value = "/thinking off"
+            await pilot.press("enter"); await pilot.pause()
+            assert pilot.app.agent.thinking_level == "off"
+    asyncio.run(run())
+
+
+def test_tui_python_exec_sets_namespace():                    # Python 输入→exec→namespace
+    async def run():
+        async with PrismApp().run_test() as pilot:
+            dock = pilot.app.query_one("#dock", Input)
+            dock.value = "x = 42"
+            await pilot.press("enter"); await pilot.pause()
+            assert pilot.app.agent.namespace.get("x") == 42
+    asyncio.run(run())
+
+
+def test_tui_at_main_runs_with_fake_model():                  # @main→inject→actor 跑(fake model)
+    async def run():
+        async with PrismApp().run_test() as pilot:
+            app = pilot.app
+            app.agent.model = FakeModel([("main-reply", [])])   # 避免真 LLM
+            dock = app.query_one("#dock", Input)
+            dock.value = "@main hi"
+            await pilot.press("enter")
+            for _ in range(50):
+                await pilot.pause(0.05)
+                if app.agent.last_result: break
+            assert app.agent.last_result == "main-reply"
+    asyncio.run(run())

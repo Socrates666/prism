@@ -107,3 +107,11 @@ def test_agent_holds_patches_and_applies():              # Agent 级端到端: p
     agent.run("go")
     tool_msgs = [m for m in agent.messages if m["role"] == "tool"]
     assert tool_msgs and tool_msgs[0]["content"] == "HI"
+
+
+def test_tool_terminate_stops_loop():                          # Tool.terminate=True→loop 停
+    tool = Tool("stop", "", {"type": "object", "properties": {}}, lambda a: "done", terminate=True)
+    model = FakeModel([("", [tc("stop", {})]), ("never-reached", [])])
+    msgs = run_agent_loop(model, "s", "g", [tool], lambda e: None)
+    assert any(m["role"] == "tool" for m in msgs)            # stop 被执行
+    assert len([m for m in msgs if m["role"] == "assistant"]) == 1  # 只 1 轮(terminate 中断)
