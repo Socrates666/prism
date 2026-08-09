@@ -267,6 +267,14 @@ Frontend(ABC) → TextualTui(全屏套壳)
 
 ---
 
+## 现状总览(审计 2026-08-10)
+
+- **代码**: prism/ 11 模块(agent/agent_loop/model/router/shell/patch/registry/spawn/guard/commands + __init__); ext/ 已建(commands/skills)
+- **测试**: 81 passed, 覆盖率 85%
+- **已完成**: 阶段 0-9(骨架/TUI/actor/patch/registry/spawn/comms/guard/测试) + 阶段 1(对齐 pi, D1-D5)
+- **未完成**: 阶段 10(持久化, ★最大缺口) / 阶段 11(跨会话验证) / 阶段 12(运行时接通: theme+子agent可见)
+- **核心缺口**: ① 持久化(原则 6/7)完全未做 → 原始痛点(跨会话)无法验证; ② 子 agent 输出没桥接 transcript → 不可见
+
 ## 实现路线
 
 ### ✓ 阶段 0 · 骨架 + 本地内核 + REPL + function-calling loop
@@ -335,26 +343,51 @@ Frontend(ABC) → TextualTui(全屏套壳)
 - [x] **黑盒**: 端到端集成(test_e2e: main→spawn→inject→workspace) + TUI Pilot(test_tui: 结构/焦点/不崩)
 - [x] **验收**: pytest 全绿; e2e 跑通 main→spawn→inject→workspace 全链路
 
-### 阶段 10 · 持久化 + 后端可插拔 + daemon(原则 6/7)
-- [ ] DocStore/MemoryBackend 周期 dump;后端切换;DaemonRuntime
-- [ ] **验收**: 强杀重启恢复;NullMemory 能跑
+### 阶段 10 · 持久化 + 后端全可插拔 + daemon(原则 6/7) ★当前最大缺口
 
-### 阶段 11 · 跨会话传递验证
-- [ ] 复现原始痛点验收
+> **现状(审计)**: 完全未做。`agent.messages` 仅内存, 强杀即丢; 后端只有 `ModelBackend`, 
+> `Runtime/Memory/DocStore` 接口未定义。这是原则 6(持久化核心地基)/7(后端全可插拔)的核心, 
+> 也是原始痛点(跨会话 agent 交互)的地基。
+
+- [ ] **后端接口(原则7全可插拔)**: 定义 `MemoryBackend`(save/load/clear 跨会话状态) / `DocStore`(文档/笔记) / `RuntimeBackend`(本地 vs daemon) ABC
+- [ ] **周期 dump**: agent.messages 变更后/周期写 MemoryBackend
+- [ ] **强杀重启恢复**: 启动 load → agent.messages 恢复
+- [ ] **NullMemory**: 空实现(不持久化)能跑(开发/测试默认)
+- [ ] **daemon**: DaemonRuntime(后台进程, 跨 TUI 重启保持 agent 活)
+- [ ] **验收**: 强杀重启恢复对话; NullMemory 跑通; 后端切换(内存↔文件)无感
+
+### 阶段 11 · 跨会话传递验证(复现原始痛点)
+- [ ] **复现种子**: "IPython 跨会话 agent 交互" —— 依赖阶段 10 持久化
+      - 场景A: TUI 重启, @main 还记得之前对话(messages 从 MemoryBackend 恢复)
+      - 场景B: 主 agent spawn 子 agent, 跨 inject 通讯, 状态延续
+- [ ] **验收**: 重启后对话延续; 子 agent 状态可读
+
+### 阶段 12 · 运行时接通(theme 口子 + 子 agent 输出可见) ★缺口
+
+> **现状(审计)**: 
+> - theme: namespace 没 app 句柄, agent 改不了主题(开放问题 #16)
+> - 子 agent: main 通过 python 工具 spawn 的子 agent, emit 没桥接到 transcript → **输出不可见**
+
+- [ ] **theme 自举口子**: on_mount 暴露 app/ThemeCtl 进 namespace → agent 能 `app.theme=...`
+- [ ] **子 agent emit 汇入**: spawn 的子 agent emit 默认汇入主 transcript(带 [name] 前缀, 不分屏)
+- [ ] **spawn 便捷路径**: `/spawn` 指令 或 main python 工具 spawn 时自动接 emit + 注册 namespace
+- [ ] **验收**: agent 运行时切主题; spawn 的 bob 输出带 `[bob]` 显示在主 transcript
 
 ---
 
 ## 开放问题 / 风险
 
 1-8. (前期:mem0共享/文档格式/异步GIL/护栏边界/恢复开销/NullMemory/@边界/流式阻塞)
-9. around patch 异常降级(已定:跳过+警告)
-10. 增量 vs 覆盖边界(核心 prism/ 不可 overwrite,ext/ 可改)
-11. patch 注册表并发(线程安全)
-12. **textual asyncio + agent 线程桥接**(emit 跨线程 call_from_thread)— 阶段 2 spike
-13. **子 agent python 工具裸 open**(若未来赋予):落 cwd=根,踩踏。当前子 agent 无 python 工具,无此问题;若赋予,上 chdir 锁
-14. **inbox 通讯 vs 共享变量**:通讯主走 inject(安全),共享变量辅助(eventual + 加锁)
-15. **子 agent workspace 清理**:子 agent 结束后 workspaces/<name>/ 保留还是清理?待定
-16. **theme namespace gap**:TUI 模式 namespace 没 app 句柄, agent 运行时改不了主题(见 Theme 节)。补法已定, 待实现
+9. ✓ around patch 异常降级(已实现: 跳过+emit patch_error)
+10. ✓ 增量 vs 覆盖边界(guard.py: prism/ 不可写, ext/ 可改)
+11. ✓ patch 注册表并发(各 agent 独立 PatchRegistry 实例, 无共享, 无锁需求)
+12. ✓ textual asyncio + agent 线程桥接(call_from_thread, 阶段 2 spike 通过 + 全套测试验证)
+13. **子 agent python 工具裸 open**(若未来赋予): 落 cwd=根踩踏。当前子 agent 无 python 工具, 无此问题
+14. **inbox 通讯 vs 共享变量**: 通讯主走 inject(安全), 共享变量辅助(eventual + 加锁)
+15. **子 agent workspace 清理**: 结束后保留还是清理? 待定
+16. **theme namespace gap**(→ 阶段12): namespace 没 app 句柄, agent 改不了主题
+17. **子 agent emit 可见性**(→ 阶段12): spawn 的子 agent emit 没桥接 transcript, 输出不可见
+18. **持久化并发**(→ 阶段10): 多 agent 同时 dump MemoryBackend 的锁/一致性
 
 ---
 
