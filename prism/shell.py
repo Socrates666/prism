@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Input, RichLog
+from textual.widgets import Header, Input, RichLog, Static
 
 
 class Transcript(RichLog):
@@ -43,6 +43,7 @@ CSS = """
 Screen { layout: vertical; }
 #transcript { height: 1fr; border: solid $accent; padding: 0 1; }
 #dock { height: 3; border: solid $primary; }
+#current { height: auto; min-height: 1; padding: 0 1; color: $text; }
 #dock:focus { border: solid $accent; }
 """
 
@@ -61,6 +62,7 @@ class PrismApp(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield Transcript(id="transcript", wrap=True, markup=True)
+        yield Static(id="current")
         yield Input(id="dock", placeholder="@agent 消息   或   Python 代码")
 
     def on_mount(self) -> None:
@@ -70,17 +72,25 @@ class PrismApp(App):
         from .memory import FileMemory
 
         log = self.query_one("#transcript", RichLog)
+        current = self.query_one("#current", Static)
         app = self
 
-        # emit 桥接: actor 线程 emit → call_from_thread 写 RichLog(跨线程安全)
-        # 流式分行: 按 LLM 的 \n 分行(RichLog.write 每次=一行), 不每 token 一行
-        line_buf: list[str] = []
+        # emit 桥接: actor 线程 emit → call_from_thread(跨线程安全)
+        # 流式同行: message_update 累加 current_buf → update current Static(打字效果);
+        #          message_end 把整段写 RichLog(历史) + 清 current(RichLog 每写=新行, 不能同行流式)
         reasoning_buf: list[str] = []
+        current_buf: list[str] = []
 
-        def flush_line() -> None:
-            if line_buf:
-                app.call_from_thread(log.write, "".join(line_buf))
-                line_buf.clear()
+        def update_current() -> None:
+            app.call_from_thread(current.update, "".join(current_buf))
+
+        def flush_current() -> None:
+            """把流式 current 写入 RichLog(历史) + 清空(error/tool 中断流式时用)。"""
+            text = "".join(current_buf)
+            if text:
+                app.call_from_thread(log.write, text)
+            current_buf.clear()
+            app.call_from_thread(current.update, "")
 
         def flush_reasoning() -> None:
             if reasoning_buf:
@@ -92,14 +102,14 @@ class PrismApp(App):
             t = event.get("type")
             if t == "message_update":
                 flush_reasoning()                       # 思考结束, 转正式回复
-                # 按 \n 分段: 前面的完整行 flush, 最后一段留 buffer 继续累加下一个 delta
-                parts = event.get("delta", "").split("\n")
-                for i, part in enumerate(parts):
-                    line_buf.append(part)
-                    if i < len(parts) - 1:
-                        flush_line()
+                current_buf.append(event.get("delta", ""))
+                update_current()                       # 流式同行打字
             elif t == "message_end":
-                flush_line()                       # message 结束, flush 剩余行
+                text = "".join(current_buf)             # 整段写 RichLog(历史)
+                if text:
+                    app.call_from_thread(log.write, text)
+                current_buf.clear()
+                app.call_from_thread(current.update, "")
             elif t == "reasoning":
                 parts = event.get("text", "").split("\n")
                 for i, part in enumerate(parts):
@@ -107,16 +117,15 @@ class PrismApp(App):
                     if i < len(parts) - 1:
                         flush_reasoning()
             elif t == "tool_execution_start":
-                flush_line()                       # 工具前先把文本 flush
                 app.call_from_thread(log.write, f"[dim]→ {event['tool_name']}({event['args']})[/dim]")
             elif t == "tool_execution_end":
                 mark = "✗" if event.get("is_error") else "✓"
                 app.call_from_thread(log.write, f"[dim]  {mark} {str(event.get('result', ''))[:200]}[/dim]")
             elif t == "error":
-                flush_line()
+                flush_current()
                 app.call_from_thread(log.write, f"[red]error: {event.get('error')}[/red]")
             elif t == "patch_error":
-                flush_line()
+                flush_current()
                 app.call_from_thread(log.write, f"[yellow]⚠ patch {event.get('phase')}/{event.get('point')}: {event.get('error')} (已降级)[/yellow]")
 
         # 加载 ext/(tools/prompts/patches/skills 进 default_registry, 容错) + slash 指令

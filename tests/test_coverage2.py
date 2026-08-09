@@ -243,6 +243,23 @@ def test_shell_emit_all_branches():
     asyncio.run(run())
 
 
+def test_shell_flush_current_on_error():
+    """流式中 error → flush_current 把已收到的 current 写入 RichLog。"""
+    from prism.shell import PrismApp
+
+    async def run():
+        async with PrismApp().run_test() as pilot:
+            app = pilot.app
+            log_writes = []
+            app.call_from_thread = lambda fn, *a, **k: (log_writes.append(a[0]) if fn.__name__ == "write" and a else None)
+            emit = app.agent.hooks["emit"]
+            emit({"type": "message_update", "delta": "partial"})   # current = "partial"
+            emit({"type": "error", "error": "boom"})               # flush_current 写 "partial"
+            await pilot.pause()
+            assert "partial" in log_writes
+    asyncio.run(run())
+
+
 def test_tui_slash_unknown_command():
     from prism.shell import PrismApp
     from textual.widgets import Input
