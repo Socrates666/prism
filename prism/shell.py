@@ -1,43 +1,96 @@
-"""prism REPL 入口 —— 起一个 IPython 内核, 注入 Agent。
+"""prism TUI 套壳 — textual 全屏, 抄 pi 的 transcript + dock 布局。
 
-启动后用户直接用 Python:
-    a = Agent("alice", model=OpenAIModel())   # 创建第一个 agent
-    a.run("算 2+2 存到 x")                      # agent 在内核建变量
-    x                                            # 直接访问(共享命名空间)
-    a.system_prompt = "你只说海盗话"             # 改 agent 自己的 prompt
+布局(抄 pi packages/tui/fullscreen.ts):
+  上方 transcript(RichLog 滚动对话区) + 底部 dock(Input 固定输入)
+
+@ 路由(原则8)在 Input 处理; agent emit 跨线程到 RichLog(call_from_thread)。
 """
 from __future__ import annotations
 
+from textual.app import App, ComposeResult
+from textual.widgets import Header, Input, RichLog
 
-BANNER = """\
-╭─ prism ─ 棱镜 ─────────────────────────────────────╮
-│  一个 IPython 内核里的 agent 外壳                   │
-│                                                     │
-│  a = Agent("alice", model=OpenAIModel())           │
-│  a.run("...")   /   a.chat("...")                   │
-│  直接敲 Python —— 跟 agent 共享命名空间             │
-│  a.system_prompt = "..."   # 改 agent 自己          │
-╰─────────────────────────────────────────────────────╯
 
-环境变量: PRISM_MODEL / OPENAI_BASE_URL / OPENAI_API_KEY
+CSS = """
+Screen { layout: vertical; }
+#transcript { height: 1fr; border: solid $accent; padding: 0 1; }
+#dock { height: 3; border: solid $primary; }
+#dock:focus { border: solid $accent; }
 """
 
 
-def main():
-    """起 IPython REPL, 预填 Agent / OpenAIModel 到命名空间。"""
-    import IPython
-    from .agent import Agent
-    from .model import OpenAIModel
+class PrismApp(App):
+    """prism 全屏 TUI(transcript + dock)。"""
 
-    from traitlets.config import Config
-    cfg = Config()
-    cfg.InteractiveShellApp.extensions = ["prism"]  # 启动时加载 @ 路由
-    user_ns = {
-        "Agent": Agent,
-        "OpenAIModel": OpenAIModel,
-    }
-    IPython.start_ipython(argv=[], user_ns=user_ns, config=cfg, banner1=BANNER)
+    CSS = CSS
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.agent = None  # 主 agent(on_mount 时建)
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=False)
+        yield RichLog(id="transcript", wrap=True, markup=True)
+        yield Input(id="dock", placeholder="@agent 消息   或   Python 代码")
+
+    def on_mount(self) -> None:
+        from .agent import Agent
+        from .model import OpenAIModel
+
+        self.agent = Agent("main", model=OpenAIModel(), kind="main")
+        log = self.query_one("#transcript", RichLog)
+        app = self
+
+        # emit 桥接: actor 线程 emit → call_from_thread 写 RichLog(跨线程安全)
+        def emit(event: dict) -> None:
+            t = event.get("type")
+            if t == "message_delta":
+                app.call_from_thread(log.write, event.get("text", ""), shrink=False)
+            elif t == "message_end":
+                if event.get("text"):
+                    app.call_from_thread(log.write, "\n")
+            elif t == "tool_start":
+                app.call_from_thread(log.write, f"\n[dim]→ {event['name']}({event['args']})[/dim]\n")
+            elif t == "tool_end":
+                mark = "✗" if event.get("is_error") else "✓"
+                app.call_from_thread(log.write, f"[dim]  {mark} {str(event.get('result', ''))[:200]}[/dim]\n")
+            elif t == "error":
+                app.call_from_thread(log.write, f"[red]error: {event.get('error')}[/red]\n")
+
+        self.agent.hooks["emit"] = emit
+        log.write("[bold]prism[/bold] — 全屏 TUI(抄 pi transcript+dock)\n")
+        log.write("输入 [cyan]@agent 消息[/] 对话, 或直接 Python 代码。Ctrl+C 退出。\n\n")
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        text = event.value
+        if not text.strip():
+            return
+        log = self.query_one("#transcript", RichLog)
+        log.write(f"[bold green]>>>[/] {text}\n")
+        event.input.value = ""
+
+        ns = self.agent.namespace
+        stripped = text.strip()
+
+        # @ 路由(原则8): 单行 @name 消息 → 目标 agent.inject; 否则 Python exec
+        if stripped.startswith("@") and "\n" not in stripped:
+            parts = stripped[1:].split(None, 1)
+            if len(parts) < 2:
+                log.write("[red]空消息。@ 了就得说事[/]\n")
+                return
+            name, msg = parts
+            target = ns.get(name)
+            if target is not None and hasattr(target, "inject"):
+                target.inject({"type": "run", "input": msg})   # actor 线程跑, 不冻 TUI
+            else:
+                log.write(f"[red]@{name}: 命名空间没有这个 agent[/]\n")
+        else:
+            # 主 agent 享完整 IPython(原则13): 直接 exec in namespace
+            try:
+                exec(compile(text, "<prism>", "exec"), ns)
+            except Exception as e:
+                log.write(f"[red]{type(e).__name__}: {e}[/]\n")
 
 
-if __name__ == "__main__":
-    main()
+def main() -> None:
+    PrismApp().run()
