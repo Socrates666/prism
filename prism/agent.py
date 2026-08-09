@@ -10,6 +10,7 @@
 from __future__ import annotations
 import threading
 import queue
+import itertools
 from typing import Callable
 
 from .agent_loop import run_agent_loop, Tool
@@ -107,8 +108,10 @@ class Agent:
         if registry is not None:
             self._extra_tools += registry.tools()    # 全局共享池的 tool(原则 12)
         self.workspace = None             # 子 agent 由 spawn 设(原则14)
-        # ── actor(原则15): inbox + 线程 ──
-        self.inbox: queue.Queue | None = queue.Queue() if actor else None
+        # actor(原则15): inbox 总在(PriorityQueue 支持 steer/followUp 优先级); actor 只控是否起线程
+        self.inbox: queue.PriorityQueue = queue.PriorityQueue()
+        self._inject_seq = itertools.count()
+        self._subscribers: list[Callable] = []
         self._handlers: dict[str, Callable] = {"run": self._h_run, "msg": self._h_msg}
         if actor:
             self._thread = threading.Thread(target=self._actor_loop, daemon=True)
@@ -138,6 +141,20 @@ class Agent:
         elif t == "error":
             self.error_message = str(event.get("error", ""))
         self.hooks["emit"](event)
+        for sub in list(self._subscribers):
+            try:
+                sub(event)
+            except Exception:
+                pass
+
+    def subscribe(self, listener: Callable[[dict], None]):
+        """显式订阅事件流(对齐 pi session.subscribe)。返回 unsubscribe 函数。"""
+        self._subscribers.append(listener)
+
+        def unsubscribe() -> None:
+            if listener in self._subscribers:
+                self._subscribers.remove(listener)
+        return unsubscribe
 
     def execute(self, code: str) -> tuple[str, str]:
         """在共享命名空间执行 Python(python 工具底层)。
@@ -189,18 +206,21 @@ class Agent:
         self.messages = [m for m in msgs if m.get("role") != "system"]
 
     # ── actor(原则15/16) ──────────────────────────────
-    def inject(self, msg: dict) -> None:
-        """递条子(异步, 跨线程)。msg = {"type":"run"/"msg", ...}。立即返回, 不等处理。
+    def inject(self, msg: dict, *, kind: str = "followUp") -> None:
+        """递条子(异步, 跨线程)。立即返回, 不等处理。
 
+        kind(对齐 pi steer/followUp):
+          steer    插队优先(高优先级, 排在 followUp 前)
+          followUp 常规排队(默认)
         通讯分层(原则16): 触发 agent 行动用 inject(B 自己线程处理, 无 race)。
         """
-        if self.inbox is not None:
-            self.inbox.put(msg)
+        priority = 0 if kind == "steer" else 10
+        self.inbox.put((priority, next(self._inject_seq), msg))
 
     def _actor_loop(self) -> None:
         """agent 自己的线程: 等 inbox → 处理(在自己线程, 不阻塞别的 agent)。"""
         while True:
-            msg = self.inbox.get()
+            _, _, msg = self.inbox.get()
             h = self._handlers.get(msg.get("type"))
             if h:
                 try:
