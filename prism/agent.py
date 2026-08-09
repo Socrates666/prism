@@ -180,16 +180,20 @@ class Agent:
         """在共享命名空间执行 Python(python 工具底层)。
 
         护栏(原则 2/10): open 写 prism/ 核心 → PermissionError; 其余正常。
+        返回 (status, output): output 含 print 的 stdout(否则 textual 全屏吞掉, agent/用户看不到)。
         """
+        import contextlib, io
         try:
             from .guard import restricted_builtins
             glb = dict(self.namespace)
             glb.pop("__builtins__", None)
             glb["__builtins__"] = restricted_builtins()
-            exec(compile(code, f"<{self.name}>", "exec"), glb)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                exec(compile(code, f"<{self.name}>", "exec"), glb)
             glb.pop("__builtins__", None)
             self.namespace.update(glb)   # 同步新建变量回共享 namespace
-            return ("ok", "")
+            return ("ok", buf.getvalue())
         except Exception as e:
             return ("error", f"{type(e).__name__}: {e}")
 

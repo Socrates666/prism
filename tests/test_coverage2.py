@@ -43,6 +43,7 @@ def test_python_tool_execute_ok_and_error():
     py = a._tools()[0]                                  # python tool
     assert "ok" in py.execute({"code": "x=1"})
     assert "error" in py.execute({"code": "1/0"})
+    assert "hello" in py.execute({"code": "print('hello')"})   # print 输出进 result
 
 
 # ── agent_loop: tool 不存在 / args error / tool 异常 / reasoning ──
