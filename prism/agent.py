@@ -100,9 +100,12 @@ class Agent:
         self.last_result: str = ""            # prism 增量便利(pi 无, 从 messages 提取最后 assistant)
         self.messages: list[dict] = []        # 对齐 pi Agent.state.messages
         self.streaming_message: str | None = None   # 对齐 pi: 当前流式中的文本
+        self.streaming_reasoning: str | None = None   # 对齐 pi: 当前思考过程(reasoning_content)
         self.error_message: str = ""          # 对齐 pi: 最近错误
         self.thinking_level: str = thinking_level     # 对齐 pi thinkingLevel
         self.max_retries: int = max_retries           # 对齐 pi retry.maxRetries
+        if hasattr(self.model, "thinking_level"):
+            self.model.thinking_level = thinking_level   # 同步到 model 层(如 OpenAIModel)
         self.hooks: dict[str, Callable] = {"emit": _default_emit}
         self.patches = PatchRegistry(self.emit)   # 五扩展点 patch 注册表(原则 11)
         self.abort = threading.Event()
@@ -138,6 +141,8 @@ class Agent:
             self.streaming_message = (self.streaming_message or "") + event.get("delta", "")
         elif t == "message_end":
             self.streaming_message = None
+        elif t == "reasoning":
+            self.streaming_reasoning = (self.streaming_reasoning or "") + event.get("text", "")
         elif t == "tool_execution_end" and event.get("is_error"):
             self.error_message = str(event.get("result", ""))[:500]
         elif t == "error":
@@ -247,8 +252,10 @@ class Agent:
 
     # ── 对齐 pi: thinking / compaction ─────────────────
     def set_thinking_level(self, level: str) -> None:
-        """对齐 pi thinkingLevel(off/minimal/low/medium/high/xhigh/max)。model 层按需接入。"""
+        """对齐 pi thinkingLevel(off/minimal/low/medium/high/xhigh/max)。同步到 model 层。"""
         self.thinking_level = level
+        if hasattr(self.model, "thinking_level"):
+            self.model.thinking_level = level
 
     def compact(self, instructions: str = "") -> str:
         """对齐 pi compact(): 把 messages 压成摘要, 替换历史, 释放上下文。返回摘要。"""

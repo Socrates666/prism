@@ -54,15 +54,23 @@ class PrismApp(App):
         # emit 桥接: actor 线程 emit → call_from_thread 写 RichLog(跨线程安全)
         # 流式分行: 按 LLM 的 \n 分行(RichLog.write 每次=一行), 不每 token 一行
         line_buf: list[str] = []
+        reasoning_buf: list[str] = []
 
         def flush_line() -> None:
             if line_buf:
                 app.call_from_thread(log.write, "".join(line_buf))
                 line_buf.clear()
 
+        def flush_reasoning() -> None:
+            if reasoning_buf:
+                text = "".join(reasoning_buf).replace("[", "\\[")
+                app.call_from_thread(log.write, f"[dim italic]{text}[/dim italic]")
+                reasoning_buf.clear()
+
         def emit(event: dict) -> None:
             t = event.get("type")
             if t == "message_update":
+                flush_reasoning()                       # 思考结束, 转正式回复
                 # 按 \n 分段: 前面的完整行 flush, 最后一段留 buffer 继续累加下一个 delta
                 parts = event.get("delta", "").split("\n")
                 for i, part in enumerate(parts):
@@ -71,6 +79,12 @@ class PrismApp(App):
                         flush_line()
             elif t == "message_end":
                 flush_line()                       # message 结束, flush 剩余行
+            elif t == "reasoning":
+                parts = event.get("text", "").split("\n")
+                for i, part in enumerate(parts):
+                    reasoning_buf.append(part)
+                    if i < len(parts) - 1:
+                        flush_reasoning()
             elif t == "tool_execution_start":
                 flush_line()                       # 工具前先把文本 flush
                 app.call_from_thread(log.write, f"[dim]→ {event['tool_name']}({event['args']})[/dim]")

@@ -99,6 +99,8 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
                     if ev["type"] == "delta" and ev.get("text"):
                         text_parts.append(ev["text"])
                         _emit({"type": "message_update", "delta": ev["text"]})
+                    elif ev["type"] == "reasoning" and ev.get("text"):
+                        _emit({"type": "reasoning", "text": ev["text"]})
                     elif ev["type"] == "done":
                         tool_calls = ev.get("tool_calls") or []
                 break  # 成功跳出 retry

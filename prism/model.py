@@ -40,7 +40,7 @@ class OpenAIModel(ModelBackend):
 
     def __init__(self, model: str | None = None,
                  base_url: str | None = None, api_key: str | None = None,
-                 timeout: float | None = None):
+                 timeout: float | None = None, thinking_level: str | None = None):
         from openai import OpenAI
         self.client = OpenAI(
             base_url=base_url or os.getenv("OPENAI_BASE_URL"),
@@ -49,6 +49,13 @@ class OpenAIModel(ModelBackend):
         )
         self.model = model or os.getenv("PRISM_MODEL", "gpt-4o-mini")
         self._first_timeout = float(os.getenv("PRISM_STREAM_FIRST_TIMEOUT", "5"))
+        self.thinking_level = thinking_level    # off→关思考(enable_thinking=False); None/其他→endpoint 默认
+
+    def _thinking_extra_body(self):
+        """对齐 pi thinkingLevel: off → 关思考(智谱 enable_thinking=False, 快且简洁)。"""
+        if getattr(self, "thinking_level", None) == "off":
+            return {"enable_thinking": False}
+        return None
 
     def chat(self, messages, **kw) -> str:
         resp = self.client.chat.completions.create(model=self.model, messages=messages)
@@ -60,6 +67,9 @@ class OpenAIModel(ModelBackend):
             kwargs: dict = {"model": self.model, "messages": messages, "stream": False}
             if tools:
                 kwargs["tools"] = tools
+            eb = self._thinking_extra_body()
+            if eb:
+                kwargs["extra_body"] = eb
             resp = self.client.chat.completions.create(**kwargs)
         except Exception:
             yield {"type": "done", "tool_calls": []}
@@ -85,6 +95,9 @@ class OpenAIModel(ModelBackend):
                 kwargs: dict = {"model": self.model, "messages": messages, "stream": True}
                 if tools:
                     kwargs["tools"] = tools
+                eb = self._thinking_extra_body()
+                if eb:
+                    kwargs["extra_body"] = eb
                 stream = self.client.chat.completions.create(**kwargs)
                 for chunk in stream:
                     q.put(("c", chunk))
@@ -123,6 +136,9 @@ class OpenAIModel(ModelBackend):
             delta = chunk.choices[0].delta
             if delta.content:
                 yield {"type": "delta", "text": delta.content}
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                yield {"type": "reasoning", "text": reasoning}
             tcs = getattr(delta, "tool_calls", None)
             if tcs:
                 for tc in tcs:
