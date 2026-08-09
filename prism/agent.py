@@ -75,6 +75,7 @@ class Agent:
         self.tools = tools or {}
         self.max_steps = max_steps
         self.history: list[dict] = []
+        self.last_result: str = ""  # 最近一次 run 的最终结果(emit 已打印, 这里供程序化取用)
         # hooks —— 显示自举的核心(原则 9): agent 能改这些来重塑显示
         self.hooks: dict[str, Callable] = {
             "emit": lambda source, chunk: print(f"[{source} ▸] {chunk}"),
@@ -97,8 +98,11 @@ class Agent:
             return ("error", f"{type(e).__name__}: {e}")
 
     # ── ReAct 循环 ─────────────────────────────────
-    def run(self, user_input: str) -> str:
-        """主循环: 输入 → LLM(ReAct) → 行动(python/finish) → 观察 → ..."""
+    def run(self, user_input: str) -> None:
+        """主循环: 输入 → LLM(ReAct) → 行动(python/finish) → 观察 → ...
+
+返回 None —— 显示全靠 emit hooks(原则9), 避免 IPython 把返回值当 Out[] 再打印一遍。
+最终结果存 self.last_result。"""
         self.emit(f"← {user_input}", source="you")
         messages = (
             [{"role": "system",
@@ -112,9 +116,10 @@ class Agent:
 
             if action == "finish":
                 self.emit(action_input)
+                self.last_result = action_input
                 self.history.append({"role": "user", "content": user_input})
                 self.history.append({"role": "assistant", "content": raw})
-                return action_input
+                return  # 不返回值 —— emit 已打印, 避免 IPython 的 Out[] 再显示一遍(显示靠 hooks, 原则9)
 
             # 行动前过 guard hook(默认放行 = 输入即授权)
             if not self.hooks["guard"](action, action_input):
@@ -134,9 +139,9 @@ class Agent:
             messages.append({"role": "assistant", "content": raw})
             messages.append({"role": "user", "content": f"Observation: {obs}"})
 
-        self.emit("[max steps reached]", source="system")
-        return "[max steps reached]"
+        self.last_result = "[max steps reached]"
+        self.emit(self.last_result, source="system")
 
-    def chat(self, message: str) -> str:
-        """对话入口(run 的语义化别名)。"""
+    def chat(self, message: str) -> None:
+        """对话入口(run 的语义化别名)。返回 None, 显示靠 emit, 结果在 self.last_result。"""
         return self.run(message)

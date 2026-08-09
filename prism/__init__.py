@@ -35,3 +35,9 @@ from .model import ModelBackend, OpenAIModel
 
 __all__ = ["Agent", "ModelBackend", "OpenAIModel"]
 __version__ = "0.0.1"
+
+
+def load_ipython_extension(ipython):
+    """IPython 启动时加载: 注册 @ 路由 transformer。"""
+    from .router import register
+    register(ipython)

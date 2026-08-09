@@ -29,11 +29,14 @@ def main():
     from .agent import Agent
     from .model import OpenAIModel
 
+    from traitlets.config import Config
+    cfg = Config()
+    cfg.InteractiveShellApp.extensions = ["prism"]  # 启动时加载 @ 路由
     user_ns = {
         "Agent": Agent,
         "OpenAIModel": OpenAIModel,
     }
-    IPython.start_ipython(argv=[], user_ns=user_ns, banner1=BANNER)
+    IPython.start_ipython(argv=[], user_ns=user_ns, config=cfg, banner1=BANNER)
 
 
 if __name__ == "__main__":
