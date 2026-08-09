@@ -44,7 +44,7 @@ def test_add_tool_runtime():                            # [C2] 运行时加 tool
     agent.add_tool(Tool("newtool", "", {"type": "object", "properties": {}}, lambda a: "nt-ok"))
     assert "newtool" in [t.name for t in agent._tools()]
     agent.run("go")
-    tool_msgs = [m for m in agent.history if m["role"] == "tool"]
+    tool_msgs = [m for m in agent.messages if m["role"] == "tool"]
     assert tool_msgs and tool_msgs[0]["content"] == "nt-ok"
 
 

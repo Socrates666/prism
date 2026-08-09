@@ -74,24 +74,32 @@ class Agent:
     """
 
     def __init__(self, name: str, model, *, system_prompt: str = "",
+                 system_prompt_override: str | None = None,
+                 append_system_prompt: list[str] | None = None,
                  namespace: dict | None = None, tools: list[Tool] | None = None,
                  max_turns: int = 20, kind: str = "main", actor: bool = True,
                  registry=None):
         self.name = name
         self.model = model
         self.kind = kind                  # "main"(完整IPython, 有python工具) / "sub"(工厂受限, 无裸exec)
-        self.system_prompt = system_prompt or (
+        # system prompt(对齐 pi: base + append; override 整体替换)
+        self._base_system_prompt = system_prompt or (
             f"你是 {name}, prism 里的 agent。"
             "prism 是一个 textual 全屏 TUI(agent harness), 你跑在它的 IPython 内核里(有图形界面, 不是纯命令行)。"
             "你有 python 工具: 在共享命名空间执行 Python 代码(创建变量/操作对象/调标准库/改自己 system_prompt)。"
             "用户通过 @ 消息跟你对话, 你也能看到用户直接敲的 Python。你的回复流式显示在 transcript。"
             "简洁、直接、准确。不确定就说不确定, 不要编造自己的能力或环境。完成时不再调用工具, 直接回答。"
         )
+        self._system_prompt_override = system_prompt_override
+        self.append_system_prompt: list[str] = list(append_system_prompt or [])
+        self.system_prompt = self._resolve_system_prompt()
         self.namespace = namespace if namespace is not None else _user_ns()
         self.namespace.setdefault(name, self)   # agent 注册进命名空间, 能被自己/别的对象操作
         self.max_turns = max_turns
-        self.last_result: str = ""
-        self.history: list[dict] = []
+        self.last_result: str = ""            # prism 增量便利(pi 无, 从 messages 提取最后 assistant)
+        self.messages: list[dict] = []        # 对齐 pi Agent.state.messages
+        self.streaming_message: str | None = None   # 对齐 pi: 当前流式中的文本
+        self.error_message: str = ""          # 对齐 pi: 最近错误
         self.hooks: dict[str, Callable] = {"emit": _default_emit}
         self.patches = PatchRegistry(self.emit)   # 五扩展点 patch 注册表(原则 11)
         self.abort = threading.Event()
@@ -106,7 +114,29 @@ class Agent:
             self._thread = threading.Thread(target=self._actor_loop, daemon=True)
             self._thread.start()
 
+    def _resolve_system_prompt(self) -> str:
+        """对齐 pi: override 整体替换; 否则 base + append。"""
+        if self._system_prompt_override is not None:
+            return self._system_prompt_override
+        parts = [self._base_system_prompt] + self.append_system_prompt
+        return "\n\n".join(p for p in parts if p).strip()
+
+    def append_to_system_prompt(self, text: str) -> None:
+        """运行时追加 system prompt(对齐 pi appendSystemPromptOverride)。"""
+        self.append_system_prompt.append(text)
+        self.system_prompt = self._resolve_system_prompt()
+
     def emit(self, event: dict) -> None:
+        """emit 点: 跟踪 streaming_message/error_message(对齐 pi state) + 转 hooks。"""
+        t = event.get("type")
+        if t == "message_update":
+            self.streaming_message = (self.streaming_message or "") + event.get("delta", "")
+        elif t == "message_end":
+            self.streaming_message = None
+        elif t == "tool_execution_end" and event.get("is_error"):
+            self.error_message = str(event.get("result", ""))[:500]
+        elif t == "error":
+            self.error_message = str(event.get("error", ""))
         self.hooks["emit"](event)
 
     def execute(self, code: str) -> tuple[str, str]:
@@ -150,13 +180,13 @@ class Agent:
         msgs = run_agent_loop(
             self.model, self.system_prompt, user_input, self._tools(),
             self.emit, abort=self.abort, max_turns=self.max_turns,
-            history=self.history, patches=self.patches,
+            history=self.messages, patches=self.patches,
         )
         for m in reversed(msgs):
             if m.get("role") == "assistant" and m.get("content"):
                 self.last_result = m["content"]
                 break
-        self.history = [m for m in msgs if m.get("role") != "system"]
+        self.messages = [m for m in msgs if m.get("role") != "system"]
 
     # ── actor(原则15/16) ──────────────────────────────
     def inject(self, msg: dict) -> None:

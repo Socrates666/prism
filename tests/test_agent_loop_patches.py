@@ -105,5 +105,5 @@ def test_agent_holds_patches_and_applies():              # Agent 级端到端: p
     agent.patches.around("execute_tools",
                          lambda ctx, p: [{**m, "content": m["content"].upper()} for m in p(ctx)])
     agent.run("go")
-    tool_msgs = [m for m in agent.history if m["role"] == "tool"]
+    tool_msgs = [m for m in agent.messages if m["role"] == "tool"]
     assert tool_msgs and tool_msgs[0]["content"] == "HI"
