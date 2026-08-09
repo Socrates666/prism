@@ -66,6 +66,7 @@ class PrismApp(App):
         from .agent import Agent
         from .model import OpenAIModel
         from .registry import default_registry, load_ext
+        from .memory import FileMemory
 
         log = self.query_one("#transcript", RichLog)
         app = self
@@ -122,7 +123,8 @@ class PrismApp(App):
         load_ext("ext", default_registry, emit=emit)
         self.commands = load_commands("ext", emit=emit)
         # 建 main agent(接 registry → ext/ 的 tool 可用, 如 web_search)
-        self.agent = Agent("main", model=OpenAIModel(), kind="main", registry=default_registry)
+        memory = FileMemory(".prism/memory")
+        self.agent = Agent("main", model=OpenAIModel(), kind="main", registry=default_registry, memory=memory)
         self.agent.hooks["emit"] = emit
         self.agent.namespace["theme"] = ThemeCtl(self)   # theme 自举口子(阶段12, 治 #16)
         log.write("[bold]prism[/bold] — 全屏 TUI(抄 pi transcript+dock)\n")

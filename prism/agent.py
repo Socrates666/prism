@@ -15,6 +15,7 @@ from typing import Callable
 
 from .agent_loop import run_agent_loop, Tool
 from .patch import PatchRegistry
+from .memory import MemoryBackend, NullMemory
 
 
 def _user_ns() -> dict:
@@ -79,7 +80,8 @@ class Agent:
                  append_system_prompt: list[str] | None = None,
                  namespace: dict | None = None, tools: list[Tool] | None = None,
                  max_turns: int = 20, kind: str = "main", actor: bool = True,
-                 registry=None, max_retries: int = 0, thinking_level: str = "off"):
+                 registry=None, max_retries: int = 0, thinking_level: str = "off",
+                 memory: MemoryBackend | None = None):
         self.name = name
         self.model = model
         self.kind = kind                  # "main"(完整IPython, 有python工具) / "sub"(工厂受限, 无裸exec)
@@ -98,7 +100,8 @@ class Agent:
         self.namespace.setdefault(name, self)   # agent 注册进命名空间, 能被自己/别的对象操作
         self.max_turns = max_turns
         self.last_result: str = ""            # prism 增量便利(pi 无, 从 messages 提取最后 assistant)
-        self.messages: list[dict] = []        # 对齐 pi Agent.state.messages
+        self.memory = memory if memory is not None else NullMemory()
+        self.messages: list[dict] = list(self.memory.load(name))   # 启动恢复(原则6 跨会话)
         self.streaming_message: str | None = None   # 对齐 pi: 当前流式中的文本
         self.streaming_reasoning: str | None = None   # 对齐 pi: 当前思考过程(reasoning_content)
         self.error_message: str = ""          # 对齐 pi: 最近错误
@@ -270,6 +273,11 @@ class Agent:
                 self.last_result = m["content"]
                 break
         self.messages = [m for m in msgs if m.get("role") != "system"]
+        self.dump()
+
+    def dump(self) -> None:
+        """持久化 messages 到 memory(原则6 跨会话状态器官)。"""
+        self.memory.save(self.name, self.messages)
 
     # ── actor(原则15/16) ──────────────────────────────
     def inject(self, msg: dict, *, kind: str = "followUp") -> None:
