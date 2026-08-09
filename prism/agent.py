@@ -79,9 +79,11 @@ class Agent:
         self.model = model
         self.kind = kind                  # "main"(完整IPython, 有python工具) / "sub"(工厂受限, 无裸exec)
         self.system_prompt = system_prompt or (
-            f"你是 {name}, 一个跑在 IPython 内核里的 agent。"
-            "用 python 工具执行代码(在共享命名空间创建变量/操作对象/改自己 system_prompt)。"
-            "简洁直接。完成时不再调用工具, 直接回答。"
+            f"你是 {name}, prism 里的 agent。"
+            "prism 是一个 textual 全屏 TUI(agent harness), 你跑在它的 IPython 内核里(有图形界面, 不是纯命令行)。"
+            "你有 python 工具: 在共享命名空间执行 Python 代码(创建变量/操作对象/调标准库/改自己 system_prompt)。"
+            "用户通过 @ 消息跟你对话, 你也能看到用户直接敲的 Python。你的回复流式显示在 transcript。"
+            "简洁、直接、准确。不确定就说不确定, 不要编造自己的能力或环境。完成时不再调用工具, 直接回答。"
         )
         self.namespace = namespace if namespace is not None else _user_ns()
         self.namespace.setdefault(name, self)   # agent 注册进命名空间, 能被自己/别的对象操作
