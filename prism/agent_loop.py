@@ -10,13 +10,15 @@
   should_stop      判停             before/after(ctx.stop 可被改)
   emit             每个 emit 事件    before/after(ctx.event 可被改)
 
-事件协议(emit 接收 dict):
+事件协议(对齐 pi: message_update/tool_execution_*/turn_*/agent_*):
   agent_start / turn_start
-  message_delta {text}     流式文本片段
-  message_end  {text}      一轮 assistant 文本完整
-  tool_start   {name,args} 工具调用开始
-  tool_end   {name,result,is_error}
-  turn_end / agent_end / patch_error {phase,point,error}
+  message_start                 一轮 assistant 消息开始(对齐 pi)
+  message_update {delta}        流式文本片段(对齐 pi text_delta)
+  message_end  {text}           一轮 assistant 文本完整
+  tool_execution_start {tool_name,args}   工具调用开始(对齐 pi)
+  tool_execution_end   {tool_name,result,is_error}
+  turn_end / agent_end
+  patch_error {phase,point,error}   prism 增量(pi 无)
 """
 from __future__ import annotations
 import json
@@ -84,6 +86,7 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
         # ── stream_response 点(before/after) ──
         ctx_stream = {"messages": messages, "tools": tools}
         patches.run_before("stream_response", ctx_stream)
+        _emit({"type": "message_start"})          # 对齐 pi: assistant 消息开始
         text_parts: list[str] = []
         tool_calls: list[dict] = []
         for ev in model.chat_stream(ctx_stream["messages"],
@@ -92,7 +95,7 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
                 break
             if ev["type"] == "delta" and ev.get("text"):
                 text_parts.append(ev["text"])
-                _emit({"type": "message_delta", "text": ev["text"]})
+                _emit({"type": "message_update", "delta": ev["text"]})
             elif ev["type"] == "done":
                 tool_calls = ev.get("tool_calls") or []
         full_text = "".join(text_parts)
@@ -130,7 +133,7 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
                     args = json.loads(fn.get("arguments", "{}") or "{}")
                 except Exception:
                     args = {}
-                _emit({"type": "tool_start", "name": name, "args": args})
+                _emit({"type": "tool_execution_start", "tool_name": name, "args": args})
 
                 tool = ctx["tool_map"].get(name)
                 if not tool:
@@ -145,7 +148,7 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
                     except Exception as e:
                         result, is_error = f"{type(e).__name__}: {e}", True
 
-                _emit({"type": "tool_end", "name": name, "result": result, "is_error": is_error})
+                _emit({"type": "tool_execution_end", "tool_name": name, "result": result, "is_error": is_error})
                 results.append({"role": "tool", "tool_call_id": tc.get("id"), "content": str(result)})
                 if tool and tool.terminate:
                     ctx["terminate"] = True

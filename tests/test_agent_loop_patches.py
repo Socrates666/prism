@@ -84,8 +84,8 @@ def test_emit_after_patch_observes_events():             # [C4] emit after 副�
     reg.after("emit", lambda ctx: seen.append(ctx["event"]["type"]))
     run_agent_loop(FakeModel(two_turn_script()), "sys", "go", [tool],
                    lambda e: None, patches=reg)
-    assert "tool_start" in seen
-    assert "tool_end" in seen
+    assert "tool_execution_start" in seen
+    assert "tool_execution_end" in seen
 
 
 def test_around_execute_tools_exception_degrades():      # [C5] around 异常降级

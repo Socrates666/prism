@@ -54,14 +54,14 @@ def test_emit_before_can_mutate_event():
     reg = PatchRegistry()
 
     def tag(ctx):
-        if ctx["event"].get("type") == "tool_end":
+        if ctx["event"].get("type") == "tool_execution_end":
             ctx["event"]["tagged"] = True
 
     reg.before("emit", tag)
     tool = Tool("t", "", {"type": "object", "properties": {}}, lambda a: "r")
     run_agent_loop(FakeModel([("", [tc("t", {})]), ("done", [])]),
                    "s", "g", [tool], lambda e: captured.append(e), patches=reg)
-    tool_ends = [e for e in captured if e.get("type") == "tool_end"]
+    tool_ends = [e for e in captured if e.get("type") == "tool_execution_end"]
     assert tool_ends and tool_ends[0].get("tagged") is True
 
 

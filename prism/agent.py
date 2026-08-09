@@ -31,14 +31,14 @@ def _user_ns() -> dict:
 def _default_emit(event: dict) -> None:
     """默认显示: 流式文本 + 工具调用/结果。可被 hooks["emit"] 替换(显示自举)。"""
     t = event["type"]
-    if t == "message_delta":
-        print(event["text"], end="", flush=True)
+    if t == "message_update":
+        print(event["delta"], end="", flush=True)
     elif t == "message_end":
         if event["text"]:
             print()
-    elif t == "tool_start":
-        print(f"  → {event['name']}({event['args']})")
-    elif t == "tool_end":
+    elif t == "tool_execution_start":
+        print(f"  → {event['tool_name']}({event['args']})")
+    elif t == "tool_execution_end":
         mark = "✗" if event["is_error"] else "✓"
         print(f"    {mark} {str(event['result'])[:300]}")
 

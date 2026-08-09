@@ -62,19 +62,19 @@ class PrismApp(App):
 
         def emit(event: dict) -> None:
             t = event.get("type")
-            if t == "message_delta":
+            if t == "message_update":
                 # 按 \n 分段: 前面的完整行 flush, 最后一段留 buffer 继续累加下一个 delta
-                parts = event.get("text", "").split("\n")
+                parts = event.get("delta", "").split("\n")
                 for i, part in enumerate(parts):
                     line_buf.append(part)
                     if i < len(parts) - 1:
                         flush_line()
             elif t == "message_end":
                 flush_line()                       # message 结束, flush 剩余行
-            elif t == "tool_start":
+            elif t == "tool_execution_start":
                 flush_line()                       # 工具前先把文本 flush
-                app.call_from_thread(log.write, f"[dim]→ {event['name']}({event['args']})[/dim]")
-            elif t == "tool_end":
+                app.call_from_thread(log.write, f"[dim]→ {event['tool_name']}({event['args']})[/dim]")
+            elif t == "tool_execution_end":
                 mark = "✗" if event.get("is_error") else "✓"
                 app.call_from_thread(log.write, f"[dim]  {mark} {str(event.get('result', ''))[:200]}[/dim]")
             elif t == "error":
