@@ -37,6 +37,7 @@ class PrismApp(App):
     def __init__(self) -> None:
         super().__init__()
         self.agent = None  # 主 agent(on_mount 时建)
+        self.commands = {}  # slash 指令(on_mount 时从 ext/commands/ 加载)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -99,7 +100,12 @@ class PrismApp(App):
                 app.call_from_thread(log.write, f"[yellow]⚠ patch {event.get('phase')}/{event.get('point')}: {event.get('error')} (已降级)[/yellow]")
 
         self.agent.hooks["emit"] = emit
+        # 加载 slash 指令(ext/commands/, 扩展点)
+        from .commands import load_commands
+        self.commands = load_commands("ext", emit=emit)
         log.write("[bold]prism[/bold] — 全屏 TUI(抄 pi transcript+dock)\n")
+        if self.commands:
+            log.write("指令: " + "  ".join(f"[cyan]/{n}[/]" for n in sorted(self.commands)) + "\n")
         log.write("输入 [cyan]@agent 消息[/] 对话, 或直接 Python 代码。Ctrl+C 退出。\n\n")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -112,6 +118,25 @@ class PrismApp(App):
 
         ns = self.agent.namespace
         stripped = text.strip()
+
+        # / 指令(ext/commands/, 扩展点)
+        if stripped.startswith("/") and "\n" not in stripped:
+            parts = stripped[1:].split(None, 1)
+            name = parts[0] if parts else ""
+            args = parts[1] if len(parts) > 1 else ""
+            cmd = self.commands.get(name)
+            if cmd is None:
+                log.write(f"[red]/{name}: 未知指令。可用: {' '.join('/'+c for c in sorted(self.commands))}[/]\n")
+            else:
+                try:
+                    ctx = {"agent": self.agent, "app": self, "write": lambda m: log.write(m),
+                           "commands": self.commands}
+                    result = cmd.run(args, ctx)
+                    if result:
+                        log.write(f"{result}\n")
+                except Exception as e:
+                    log.write(f"[red]/{name} 失败: {type(e).__name__}: {e}[/]\n")
+            return
 
         # @ 路由(原则8): 单行 @name 消息 → 目标 agent.inject; 否则 Python exec
         if stripped.startswith("@") and "\n" not in stripped:
