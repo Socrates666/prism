@@ -183,29 +183,38 @@ prism/
 └── tests/
 ```
 
-### 扩展点 patch 协议(原则 11)
+### 扩展点 patch 系统设计(原则 11, 阶段 3 实现)
 
+**immutable base 边界**:`patch.py` + `agent_loop.py` 都属 base —— agent 不能 overwrite。patch 只能 **register 进 PatchRegistry**(扩展层), 不能改 patch 机制本身。
+
+**PatchRegistry**(全局共享, 增量 add, 按 priority 排序):
 ```python
-# prism/patch.py
-PATCH_POINTS = ["build_messages", "stream_response", "execute_tools", "should_stop", "emit"]
-
 class PatchRegistry:
-    """全局共享的 patch 注册表。增量 add, 不 overwrite 核心代码。"""
-    def register(self, point: str, name: str, when: str, fn: callable, priority: int = 0):
-        # when: "before" | "after" | "around"
-        ...
-    def before(self, point, ctx) -> ctx:       # 跑 before 链, 可改 ctx/阻止
-    def after(self, point, ctx, result):       # 跑 after 链, 可改 result
-    def around(self, point, ctx, original):    # 跑 around 链, 可替换/调原
+    def register(self, point, name, when, fn, priority=0):
+        # when: "before" | "after" | "around"; 同 point+when 按 priority 升序(小先跑)
+    def run_before(self, point, ctx) -> ctx:               # 顺序跑 before 链
+    def run_after(self, point, ctx, result) -> result:     # 顺序跑 after 链
+    def run_around(self, point, ctx, original_fn):         # 包裹链, 最内调 original_fn
+```
 
-# agent_loop 关键点查询注册表:
-def run_agent_loop(...):
-    for turn in ...:
-        ctx = patch.before("build_messages", ctx)         # before
-        msgs = build_messages(ctx)                        # 原逻辑
-        msgs = patch.after("build_messages", ctx, msgs)   # after
-        # around 版: msgs = patch.around("build_messages", ctx, build_messages)
-        ...
+**五个扩展点 + ctx/result 协议:**
+
+| 扩展点 | ctx | before 可改 | after 可改 | around 可替换 |
+|---|---|---|---|---|
+| build_messages | messages, system_prompt, user_input | messages | messages | 构造逻辑 |
+| stream_response | messages, tools | messages/tools | response | 流式逻辑 |
+| execute_tools | tool_calls, tool_map | tool_calls(可拦) | results | 执行逻辑 |
+| should_stop | message, tool_results, turn | 判断输入 | stop 布尔 | 判断逻辑 |
+| emit | event | event | — | 输出逻辑 |
+
+**around 异常降级**(关键, 跟可变区容错一致):任何 patch(before/after/around)抛异常 → **跳过该 patch + emit 警告, 不挂 base loop**。扩展层坏不拖垮 base, base loop 永远跑得下去。
+
+**agent_loop 接入**(每扩展点: before → around(原逻辑) → after):
+```python
+ctx = {"messages":..., "system_prompt":..., "user_input":...}
+ctx = patches.run_before("build_messages", ctx)
+msgs = patches.run_around("build_messages", ctx, _build_messages)
+msgs = patches.run_after("build_messages", ctx, msgs)
 ```
 
 ### 注册表(原则 12, 全局共享非单例)
