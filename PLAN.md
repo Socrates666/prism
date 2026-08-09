@@ -318,6 +318,23 @@ Frontend(ABC) → TextualTui(全屏套壳)
 - [x] **黑盒**: 端到端集成(test_e2e: main→spawn→inject→workspace 全链路 + 多 agent 隔离 + 跨 agent eventual 读) + TUI Pilot(test_tui: 结构/焦点修复回归/不崩)
 - [x] **验收**: pytest 59 全绿; e2e 跑通 main→spawn→inject→workspace 全链路
 
+### ▶ 阶段 7.6 · 对齐 pi agent 基线(语义 + prompt, 用户定) ← 当前
+
+**详见 [docs/alignment-pi.md](docs/alignment-pi.md)** —— 对齐审计(偏离项 + 增量映射)。
+
+**语言鸿沟**: pi = TS SDK, prism = Python(IPython 核心)。“严格对齐” = 语义/行为/prompt 对齐, 非 SDK 复用。prism 是 pi agent 的 Python 增量实现。
+
+**偏离修正(P0/P1)**:
+- [ ] D1 事件命名对齐 pi(message_update·text_delta / tool_execution_start/end)
+- [ ] D2 state 命名对齐(history→messages; 补 streaming_message/error_message)
+- [ ] D3 system prompt override/append 机制
+- [ ] D4 inject 区分 steer/followUp + 显式 subscribe
+- [ ] 增量标注: 每个增量模块 docstring 注明 "pi 基础 + prism 增量"
+
+**增量(建在 pi 基础上, 已审计)**: 多agent actor / patch五点 / workspace闭包 / guard护栏 / @路由+IPython / ext容错 / 能力分层 —— 详见 alignment-pi.md §3
+
+**验收**: 对齐审计文档 ✓ + P0 偏离修正(事件命名/prompt机制/增量标注) + 增量映射清晰
+
 ### 阶段 8 · 持久化 + 后端可插拔 + daemon(原则 6/7)
 - [ ] DocStore/MemoryBackend 周期 dump;后端切换;DaemonRuntime
 - [ ] **验收**: 强杀重启恢复;NullMemory 能跑
