@@ -1,0 +1,19 @@
+[project]
+name = "prism"
+version = "0.0.1"
+description = "棱镜: 一个 IPython 内核里的 agent 外壳"
+requires-python = ">=3.10"
+dependencies = [
+    "ipython>=8.0",
+    "openai>=1.0",
+]
+
+[project.scripts]
+prism = "prism.shell:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["prism*"]
