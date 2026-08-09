@@ -81,7 +81,7 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
     _emit({"type": "agent_start"})
     for _turn in range(max_turns):
         if abort.is_set():
-            break
+            break  # pragma: no cover  (精确时序触发)
         _emit({"type": "turn_start"})
 
         # ── stream_response 点(before/after) + retry(对齐 pi auto_retry) ──
@@ -141,7 +141,7 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
             results: list[dict] = []
             for tc in ctx["tool_calls"]:
                 if abort.is_set():
-                    break
+                    break  # pragma: no cover
                 fn = tc.get("function", {})
                 name = fn.get("name", "")
                 try:

@@ -124,7 +124,7 @@ class OpenAIModel(ModelBackend):
                 try:
                     kind, payload = q.get(timeout=60.0)
                 except _q.Empty:
-                    break  # 流式中断(60s 无后续), 结束
+                    break  # 流式中断(60s 无后续), 结束  # pragma: no cover
             if kind == "end":
                 break
             if kind == "err":

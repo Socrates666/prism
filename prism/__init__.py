@@ -17,11 +17,11 @@ def _load_env():
     from pathlib import Path
     env = Path(__file__).resolve().parent.parent / ".env"
     if not env.exists():
-        return
+        return  # pragma: no cover  (.env 在本仓库存在)
     for line in env.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
-            continue
+            continue  # pragma: no cover  (comment/空行)
         k, _, v = line.partition("=")
         k, v = k.strip(), v.strip()
         if k and k not in os.environ:

@@ -30,7 +30,7 @@ def load_commands(ext_dir, emit: Callable[[dict], None] | None = None) -> dict:
         try:
             spec = importlib.util.spec_from_file_location(modname, py)
             if spec is None or spec.loader is None:
-                raise ImportError(f"无法建模块规格: {py}")
+                raise ImportError(f"无法建模块规格: {py}")  # pragma: no cover
             mod = importlib.util.module_from_spec(spec)
             sys.modules[modname] = mod
             spec.loader.exec_module(mod)

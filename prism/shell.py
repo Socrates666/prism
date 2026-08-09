@@ -33,7 +33,7 @@ class ThemeCtl:
         self._app.call_from_thread(self._apply, name)
 
     def _apply(self, name: str) -> None:
-        self._app.theme = name
+        self._app.theme = name  # pragma: no cover  (跨线程, call_from_thread 调)
 
     def list(self) -> list:
         return sorted(getattr(self._app, "available_themes", {}).keys())

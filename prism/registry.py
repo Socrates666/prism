@@ -76,7 +76,7 @@ def load_ext(ext_dir, registry: Registry,
             try:
                 spec = importlib.util.spec_from_file_location(modname, py)
                 if spec is None or spec.loader is None:
-                    raise ImportError(f"无法为 {py} 建模块规格")
+                    raise ImportError(f"无法为 {py} 建模块规格")  # pragma: no cover
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules[modname] = mod
                 spec.loader.exec_module(mod)

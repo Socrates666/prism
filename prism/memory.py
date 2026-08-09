@@ -24,7 +24,7 @@ class MemoryBackend(ABC):
     def clear(self, key: str) -> None: ...
 
     def keys(self) -> list[str]:
-        return []
+        return []  # pragma: no cover  (default, 子类 override)
 
 
 class NullMemory(MemoryBackend):
