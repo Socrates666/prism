@@ -114,7 +114,7 @@ agent_loop 五点 patchable(build_messages / stream_response / execute_tools / s
 ```
 ┌─ textual TUI 套壳(全屏, asyncio) ──────────────────────┐
 │  输入面板  @ 路由 / Python exec(主agent) / inject(子agent)│
-│  输出面板  agent emit 事件 → 渲染(分屏 per agent)        │
+│  输出面板  agent emit 事件 → 单 transcript(主视图, 取消分屏)  │
 │  状态面板  agent 列表 / 后台 / 命名空间变量               │
 └─────────────────────────────────────────────────────────┘
         ▲ emit(跨线程)               ▼ inject / 输入
@@ -252,7 +252,7 @@ Frontend(ABC) → TextualTui(全屏套壳)
 
 **借鉴 → prism**: function calling / 双层 while / streamResponse(delta) / executeToolCalls / EventStream / AbortSignal → `agent_loop.py`(function-calling + 事件流 + 流式)。砍 compaction/steering/parallel(后续)。
 
-**textual TUI 抄 pi**(packages/tui): 全屏 alternate-screen + transcript(滚动对话区) + dock(底部输入) 布局(fullscreen.ts)。textual 抄: `App`+`RichLog`(transcript)+`Input`(dock); 组件 Box→Container / Input→Input / Markdown→Markdown; 多 agent 输出分屏(per agent 面板)。
+**textual TUI 抄 pi**(packages/tui): 全屏 alternate-screen + transcript(滚动对话区) + dock(底部输入) 布局(fullscreen.ts)。textual 抄: `App`+`RichLog`(transcript)+`Input`(dock); 组件 Box→Container / Input→Input / Markdown→Markdown。~~多 agent 输出分屏~~ **已取消(用户定)**: 只用单 transcript, 子 agent 输出汇入主视图(带 [name] 前缀), 不开多面板。
 
 **prism 独有(超 prime)**:
 - 主 agent 完整 IPython + 共享命名空间(prime 子 agent 独立 session,不共享)
@@ -277,8 +277,8 @@ Frontend(ABC) → TextualTui(全屏套壳)
 - [x] @ 路由挪进 TUI 输入(单行 @name → inject)
 - [x] transcript can_focus=False(点击不抢 Input 焦点)
 - [ ] **遗留**: theme 口子——namespace 未暴露 app 句柄, agent 够不到 self.theme(见 Theme 节)
-- [ ] **未做**: 多 agent 输出分屏(等阶段 5+)
-- [x] **验收**: TUI 跑, @main 对话, 流式输出(分屏待多 agent)
+- [ ] **已取消**: 多 agent 输出分屏(用户定, 改单 transcript 汇入)
+- [x] **验收**: TUI 跑, @main 对话, 流式输出
 
 ### ✓ 阶段 2 · actor 异步(原则 15)
 - [x] Agent 线程 + inbox + inject
@@ -291,23 +291,32 @@ Frontend(ABC) → TextualTui(全屏套壳)
 - [x] Agent 持有 patches; TUI 显示 patch_error 降级
 - [x] **验收**: around patch 包裹 execute_tools 改行为(15 测试绿),不改 base(patches 缺省 no-op)
 
-### 阶段 4 · 注册表 + 可变区(原则 12)
-- [ ] registry.py + ext/ 容错加载
-- [ ] **验收**: ext/tools 丢 .py,已有 agent 能用;坏的跳过
+### ✓ 阶段 4 · 注册表 + 可变区(原则 12)
+- [x] registry.py(Registry tool/prompt/skill + load_ext 容错) + default_registry 全局共享池
+- [x] Agent 加 registry 参数, _extra_tools += registry.tools()
+- [x] **验收**: ext/tools 丢 .py 已有 agent 能用;坏的跳过+emit(5 测试绿)
 
-### 阶段 5 · 多 agent 工厂 + 工作区(原则 13/14)★
-- [ ] spawn.py(spawn 工厂 + make_file_tools 闭包)
-- [ ] workspaces/<name>/ 独占分配
-- [ ] 子 agent 无裸 exec,工厂赋予工具
-- [ ] **验收**: 主 agent spawn bob,bob 文件操作落 workspaces/bob/,不踩主 agent
+### ✓ 阶段 5 · 多 agent 工厂 + 工作区(原则 13/14)★
+- [x] spawn.py(spawn 工厂 + make_file_tools 闭包绑 ws)
+- [x] workspaces/<name>/ 独占分配(已存在报错)
+- [x] 子 agent kind=sub 无裸 exec,工厂赋予工具; spawn(parent=) 注册进父 namespace
+- [x] **验收**: bob 文件操作落 workspaces/bob/,不踩主 agent(6 测试绿)
 
-### 阶段 6 · 多 agent 通讯(原则 16)
-- [ ] inject 跨 agent;读 eventual(属性)
-- [ ] **验收**: 主 inject bob 干活,bob 处理;主读 bob.last_result
+### ✓ 阶段 6 · 多 agent 通讯(原则 16)
+- [x] inject 跨 agent(actor 阶段 2 已有); spawn(parent) 让主 agent 命名空间持子 agent
+- [x] 读 eventual(直接属性访问 last_result/history)
+- [x] **验收**: 主 inject bob 干活 bob 处理; 主读 bob.last_result; inject 立即返回(5 测试绿)
 
-### 阶段 7 · 增量扩建自我修复(原则 10)
-- [ ] agent add patch/tool 进注册表;护栏拦 overwrite prism/
-- [ ] **验收**: agent 加 before patch 改 react,不改 agent_loop.py
+### ✓ 阶段 7 · 增量扩建自我修复 + 护栏(原则 2/7/10)
+- [x] guard.py: 包装主 agent exec 的 open, 写 prism/ 核心 → PermissionError
+- [x] Agent.add_patch(point, fn, kind) / add_tool(tool): 运行时扩建正道
+- [x] Agent.execute 用受限 builtins(open=guarded)
+- [x] **验收**: add_patch 改 react 不改 agent_loop.py; 护栏拦 prism/ 放行别处(6 测试绿)
+
+### ▶ 阶段 7.5 · 白盒 + 黑盒测试(用户定, 阶段7 后做) ← 当前
+- [ ] **白盒**: 单元测试覆盖率审计(tests/ 已覆盖 patch/agent_loop/registry/spawn/comms/guard/self_repair 内部) → 补缺口 + 跑 pytest 全套绿 + 关键分支覆盖
+- [ ] **黑盒**: 端到端真实交互(textual Pilot + FakeModel 串起整条链) —— TUI 启动 → @main 对话 → spawn 子 agent → inject 跨 agent → 子 agent 文件落 workspace
+- [ ] **验收**: pytest 全绿 + 一个端到端 Pilot 测试跑通 main→spawn→inject→workspace 全链路
 
 ### 阶段 8 · 持久化 + 后端可插拔 + daemon(原则 6/7)
 - [ ] DocStore/MemoryBackend 周期 dump;后端切换;DaemonRuntime
