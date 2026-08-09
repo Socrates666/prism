@@ -36,28 +36,29 @@ def at_error(msg: str):
     raise SyntaxError(msg)
 
 
-def _transform(src: str) -> str:
-    """IPython input_transformers_post: 处理整个 cell。"""
+def _transform(lines):
+    """IPython input_transformers_post: 接收 list[str](行), 返回 list[str]。"""
+    src = "".join(lines)
     stripped = src.strip()
     if not stripped.startswith("@"):
-        return src
+        return lines
     # 多行 cell 不路由 —— 可能是 @decorator + def/class, 别误吞
     if "\n" in stripped:
-        return src
+        return lines
 
     ats = re.findall(r"@(\w+)", stripped)
     if not ats:
-        return 'at_error("裸 @ 不允许:必须是 @name 消息(单行)")\n'
+        return ['at_error("裸 @ 不允许:必须是 @name 消息(单行)")\n']
     if len(ats) > 1:
         names = ", ".join("@" + n for n in ats)
-        return f'at_error("@ 不允许群发:检测到 {names},一次只准 @ 一个 agent")\n'
+        return [f'at_error("@ 不允许群发:检测到 {names},一次只准 @ 一个 agent")\n']
 
     name = ats[0]
     m = re.match(rf"@{re.escape(name)}\s*(.*)", stripped, re.S)
     message = (m.group(1) if m else "").strip()
     if not message:
-        return f'at_error("@{name}:空消息。@ 了就得说事")\n'
-    return f"at_route({name!r}, {message!r})\n"
+        return [f'at_error("@{name}:空消息。@ 了就得说事")\n']
+    return [f"at_route({name!r}, {message!r})\n"]
 
 
 def register(ipython):
