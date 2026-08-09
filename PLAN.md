@@ -46,8 +46,11 @@ RuntimeBackend / MemoryBackend / DocStore / ModelBackend 全可换。
 ### 原则 9 · 显示自举(agent 内部 hooks)
 显示方法是 agent 运行时创造的。外壳提供 hooks,agent 改 hooks 创造显示。
 
-### 原则 10 · 默认 agent 实现 immutable + 扩展层隔离
-默认 agent 实现(抄 prime-agent 的 `agent_loop.py`)= immutable base,永不 overwrite。扩展层(patch/tool/skill)增量 add,跟 base 物理隔离(`ext/` vs `prism/`)。绕开 reload-vs-实例 冲突。
+### 原则 10 · base 可写 + 自动回退 + /revert(agent 自我演进, 安全网)
+
+**演进**(从 immutable → 可变+回退; werden 讨论的原始设计, PLAN 曾保守取 immutable(line 103 "改代码→修正=扩建"), 现恢复): 主 agent **能改 prism/ 实现**(自我演进)。安全网: ① 改前自动备份(`.prism/backups/`) ② 运行失败(reload/import/sanity 错)自动回退 ③ `/revert` **第一公民指令**(base, 不在 ext/)手动回退。扩展层(ext/)仍增量 add(原则 12)。base 可写但有回退护栏 —— agent 进化自身, 失败可逆。
+
+> 早期 immutable guard(拦写 prism/)退役 → 改为「备份 + 放行 + 回退」。
 
 ### 原则 11 · 扩展点 patch(before/after/around)
 agent_loop 五点 patchable(build_messages / stream_response / execute_tools / should_stop / emit)。每点支持 before/after/around。patch 注册进 PatchRegistry,不改 base。
@@ -404,6 +407,16 @@ class SystemPrompt:
       - `system_prompt_override` → `set_override`; `append_to_system_prompt` → `add_extra`(兼容)
 - [ ] **/goal /skill 改结构化段**: `/goal` → `prompt.set_goal`; `/skill` → `prompt.add_skill`(不再进 extra)
 - [ ] **验收**: `system_prompt` 渲染含 `## 角色` `## 指令` `## 行为准则` 等标题; `/goal` 进 goal 段; `/skill` 进 skills 段; override 整体替换生效
+
+### 阶段 14 · 可变 base + 自动回退 + /revert(agent 自我演进) ★设计翻转
+
+> **从 immutable → 可变+回退**(werden 原始设计, PLAN 曾保守取 immutable, 现恢复)。
+> 主 agent 能改 prism/ 实现(自我演进), 安全网: 备份 + 失败回退 + 手动 /revert。
+
+- [ ] **guard 退役拦写 → 备份+放行**: 写 prism/ 前备份原文件到 `.prism/backups/<file>.<ts>.bak`, 放行(不再 PermissionError)
+- [ ] **自动回退**: agent 改后 `importlib.reload` + sanity(语法/import 错 → 还原备份 + emit 警告; 运行时逻辑错靠 /revert, reload 抓不到)
+- [ ] **/revert 第一公民指令**(prism/, 不在 ext/commands/): 列备份 + 回退到指定/最近版本
+- [ ] **验收**: agent 改 prism/agent.py(自动备份) → 改坏(语法错) reload 失败 → 自动回退 + prism 仍跑; /revert 列/回退
 
 ---
 
