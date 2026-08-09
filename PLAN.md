@@ -239,6 +239,8 @@ Frontend(ABC) → TextualTui(全屏套壳)
 
 **借鉴 → prism**: function calling / 双层 while / streamResponse(delta) / executeToolCalls / EventStream / AbortSignal → `agent_loop.py`(function-calling + 事件流 + 流式)。砍 compaction/steering/parallel(后续)。
 
+**textual TUI 抄 pi**(packages/tui): 全屏 alternate-screen + transcript(滚动对话区) + dock(底部输入) 布局(fullscreen.ts)。textual 抄: `App`+`RichLog`(transcript)+`Input`(dock); 组件 Box→Container / Input→Input / Markdown→Markdown; 多 agent 输出分屏(per agent 面板)。
+
 **prism 独有(超 prime)**:
 - 主 agent 完整 IPython + 共享命名空间(prime 子 agent 独立 session,不共享)
 - **子 agent 工厂受限**(prime 子 agent 也是完整 session,prism 子 agent 无裸 exec + 工厂赋予工具)
