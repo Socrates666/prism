@@ -5,6 +5,7 @@
 ## 目录
 
 - [2026-08-09](./2026-08-09.md) — 项目从 0 到 1：werden 计划成型 → 阶段 0 实现 → function-calling 转型 → 扩展架构设计 → 多 agent 架构 + textual TUI 套壳落地 → TUI 焦点 bug 修复
+- [2026-08-10](./2026-08-10.md) — 对齐 pi 落地(D1–D5) + 流式 bug 修复(glm-5.2 逐token/thinking) + ext/ slash 指令 + 测试审计(88%) + PLAN 现状审计 + 结构化 system prompt(阶段13)
 
 ---
 
