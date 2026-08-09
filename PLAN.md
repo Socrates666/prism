@@ -6,9 +6,9 @@
 
 ## 一句话形态
 
-prism 是一个跑在 **IPython 内核**里的、**多 agent 同进程通讯**的、**输入即授权零揣测**的、**硬护栏只护 agent 自身运作**的、靠 **mem0 + 结构性文档 + 周期备份**解跨会话传递的、**IPython 运行时白送灵活**的、追求**无中断日常交互**的简单 agent 工具。
+prism 是一个跑在 **IPython 内核**里的、**多 agent 同进程通讯**的、**输入即授权零揣测**的、**硬护栏只护 agent 自身运作**的、靠可插拔后端解跨会话传递的、**IPython 运行时白送灵活**的、追求**无中断日常交互**的简单 agent 工具。
 
-> **daemon 是可插拔的**:核心持久化靠落盘,daemon 常驻只是"避免重启恢复"的优化,不是地基。本地(无 daemon 纯落盘)和远程(有 daemon)都能完整运行。
+> **核心只依赖接口,实现全可插拔**:daemon 可拔(本地直跑)、mem0 可拔(换文件记忆或不用)、模型可换、文档后端可换。
 
 ---
 
@@ -41,14 +41,19 @@ agent 是 IPython 命名空间里的活对象。"加能力"= REPL 里写代码�
 - 不被**状态管理**打断 = 周期性自动备份(原则 6)
 - 不被**长任务**阻塞 = 一个内核开多个长任务会话,后台跑,主交互不卡
 
-### 原则 6 · 持久化三件套是核心(防崩溃 + 解传递)
-> daemon 可插拔之后,**这一层是 prism 真正的地基**——状态全落盘,拔掉 daemon 也能恢复。
+### 原则 6 · 持久化是核心地基(防崩溃 + 解传递)
 - **周期性备份**:不等进程结束(崩溃来不及),每完成一步就落一次
-- **mem0 长期存储**:语义记忆,新 agent 能 retrieve,不只是 dump 一堆找不到的状态
-- **结构性文档**:信息有组织、可读、可交接(探索日志 / 决策记录 / 当前状态)
+- **记忆后端**:语义记忆,新 agent 能 retrieve(接口见原则 7)
+- **文档后端**:信息有组织、可读、可交接(探索日志 / 决策记录 / 当前状态)
 
-### 原则 7 · daemon 可插拔
-daemon(进程常驻)不是命脉,是**可选的持久化增强**:有它,进程不死、内存状态不丢、免重启恢复;没它,纯靠落盘层(原则 6)重启恢复。**本地(无 daemon)和远程(有 daemon)都能完整运行。** 棱镜的精神:核心是那个内核,daemon 只是外壳之一,可插可拔。
+### 原则 7 · 后端全可插拔(依赖接口)
+核心只依赖**后端接口**(`RuntimeBackend` / `MemoryBackend` / `DocStore` / `ModelBackend`),具体实现全可替换:
+- **daemon 可拔** — `LocalRuntime`(进程会死,纯落盘恢复)/ `DaemonRuntime`(进程不死,免恢复)
+- **mem0 可拔** — `Mem0Memory` / `FileMemory` / `NullMemory`(不用记忆)
+- **模型可换** — `OpenAIModel` / `ClaudeModel` / `LocalModel`
+- **文档可换** — `MarkdownDocStore` / 其他
+
+这是**依赖倒置**:核心 `Agent` / `Kernel` 不绑死任何实现。棱镜的精神——核心是那个内核,一切外壳可插可拔。
 
 ---
 
@@ -63,9 +68,10 @@ daemon(进程常驻)不是命脉,是**可选的持久化增强**:有它,进程�
 | 5 | 【状态 = agent 器官】受硬护栏保护 | 推论焊点,用户确认 |
 | 6 | 【daemon】Unix daemon,Windows 走不通 → 最初定远程 Linux | "daemon 是啥"澄清 |
 | 7 | 【灵活 = IPython 运行时】 | "灵活机制"软词拆解 |
-| 8 | 【持久化三件套】周期备份 + mem0 + 结构性文档 | "结束才备份"被否后补全 |
+| 8 | 【持久化三件套】周期备份 + 记忆 + 文档 | "结束才备份"被否后补全 |
 | 9 | 【无中断交互三层】 | 北极星词拆解 |
 | 10 | 【daemon 可插拔】daemon 从命脉降为可选,落盘层升核心 | 用户修正 |
+| 11 | 【后端全可插拔】mem0 等也插拔,提炼为依赖接口 | 用户修正(daemon+mem0 同源) |
 
 ---
 
@@ -79,124 +85,325 @@ daemon(进程常驻)不是命脉,是**可选的持久化增强**:有它,进程�
 4. **用 deepagents** → 否。HITL(approve/reject tool calls)+ sandbox 哲学跟用户**根本性冲突**,要 reverse 它的默认值,性价比最低。
 5. **远程 agent 回连本地 Windows 文件** → 我过度复杂化。用户澄清:就是 SSH 进 Linux 在那台机器干活,本地那套(pi/skill库/Hermes)跟这个工具无关。
 6. **"结束才备份"** → 否。进程崩溃(OOM / SIGHUP / 断电 / kill -9)时根本跑不到退出钩子。改周期性备份。
-7. **"自然是远程 linux"** → 我戳连锁代价(放弃 pi/skill库/舒服/重新发明 pi)。用户澄清:要的就是简单灵活日常工具,远程 Linux + SSH 是手段不是大工程。
+7. **"自然是远程 linux"** → 我戳连锁代价。用户澄清:要的就是简单灵活日常工具,远程 Linux + SSH 是手段不是大工程。
 8. **塞进 superharness 仓库的普通分支** → 用户否:不同项目不该用同一仓库普通分支(继承历史)。改为**独立仓库 prism**。
-9. **daemon 当命脉** → 用户修正:**daemon 本身可插拔**。落盘层(原则6)才是地基,daemon 是可选持久化增强。这顺带解开"Windows 走不通 daemon"的纠结——本地无 daemon 纯落盘也能跑。
+9. **daemon 当命脉** → 用户修正:daemon 可插拔,落盘层才是地基。
+10. **mem0 写死在核心** → 用户修正:mem0 也可插拔。提炼为**后端全可插拔(依赖接口)**。
 
 ---
 
 ## 系统架构(最终形态)
 
-**两层:核心层(必须) + 部署层(可插拔)**
+**两层:核心层(只依赖接口) + 可插拔实现层**
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  核心层(必须,本地/远程通用)                                │
-│                                                          │
-│   ┌─────────────────────────────────────────────┐       │
-│   │  IPython 内核                                │       │
-│   │   命名空间(共享,灵活来源)                     │       │
-│   │     ├── agent A ──┐                          │       │
-│   │     ├── agent B ──┼─ 同进程对象间通讯         │       │
-│   │     └── 子agent ──┘                          │       │
-│   │   长任务会话1(后台) ─┐                       │       │
-│   │   长任务会话2(后台)  ├─ 异步,不阻塞          │       │
-│   │   主交互会话(前台)   ─┘                       │       │
-│   └─────────────────────────────────────────────┘       │
-│            │ 周期性 dump(核心持久化)                      │
-│            ▼                                              │
-│   ┌──────────────┐  ┌──────────────┐                    │
-│   │ mem0 长期记忆 │  │ 结构性文档    │  ← 地基            │
-│   │ (语义检索)    │  │ (.md 可读)   │    (拔掉daemon     │
-│   └──────────────┘  └──────────────┘    也靠这层恢复)    │
-│                                                          │
-│   硬护栏(硬编码,只护 agent 自身运作)                      │
-│     拦:删 agent 文件/进程/状态/环境/工作目录/凭证          │
-└─────────────────────────────────────────────────────────┘
-                         ▲ 可插拔
-┌─────────────────────────────────────────────────────────┐
-│  部署层(可插拔,二选一或组合)                               │
-│                                                          │
-│   模式 A · 本地直跑(无 daemon)                            │
-│     Windows/Mac/Linux 直接开 IPython                      │
-│     进程会死 → 重启从落盘层恢复                            │
-│     代价:每次重启有恢复开销 + 依赖落盘完整                 │
-│                                                          │
-│   模式 B · daemon 常驻(可选增强)                          │
-│     远程 Linux:tmux / systemd --user / nohup+setsid      │
-│     进程不死 → 内存状态不丢 → 免重启恢复                   │
-│     价值:避免恢复开销;跨终端 detach/reattach              │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  核心层(prism 本质,不可插拔)                                │
+│                                                           │
+│   ┌─────────────────────────────────────────────┐        │
+│   │  IPython 内核 (Kernel)                       │        │
+│   │   命名空间(共享,灵活来源)                     │        │
+│   │     ├── Agent A ──┐                          │        │
+│   │     ├── Agent B ──┼─ 同进程对象间通讯         │        │
+│   │     └── 子agent ──┘                          │        │
+│   │   BackgroundSession(后台) ─┐                 │        │
+│   │   InteractiveSession(前台) ─┘ 异步,不阻塞    │        │
+│   └─────────────────────────────────────────────┘        │
+│                                                           │
+│   核心类: Agent / Kernel / Session / Guardrail            │
+│   核心只持有【后端接口】,不持有具体实现                     │
+│                                                           │
+│   硬护栏 Guardrail(硬编码,只护 agent 自身运作)             │
+└──────────────────────────────────────────────────────────┘
+            ▲ 依赖接口(依赖倒置)        ▲ 周期性 dump 走 DocStore/MemoryBackend
+┌──────────────────────────────────────────────────────────┐
+│  可插拔实现层(全可替换)                                     │
+│                                                           │
+│   RuntimeBackend    → LocalRuntime / DaemonRuntime        │
+│   MemoryBackend     → Mem0Memory / FileMemory / NullMemory│
+│   DocStore          → MarkdownDocStore / ...              │
+│   ModelBackend      → OpenAIModel / ClaudeModel / Local   │
+└──────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 工程设计(目录 / 类 / 函数 / 继承)
+
+### 目录结构
+
+```
+prism/
+├── PLAN.md
+├── README.md
+├── pyproject.toml
+├── prism/
+│   ├── __init__.py
+│   ├── core/                       # 核心(不可插拔,prism 本质)
+│   │   ├── __init__.py
+│   │   ├── agent.py                # Agent
+│   │   ├── kernel.py               # Kernel(IPython 内核封装)
+│   │   ├── session.py              # Session + Interactive/Background
+│   │   └── guardrail.py            # Guardrail(硬护栏,硬编码)
+│   ├── backends/                   # 可插拔后端(接口 + 实现)
+│   │   ├── __init__.py
+│   │   ├── runtime.py              # RuntimeBackend + Local/Daemon
+│   │   ├── memory.py               # MemoryBackend + Mem0/File/Null
+│   │   ├── docstore.py             # DocStore + MarkdownDocStore
+│   │   └── model.py                # ModelBackend + 各 provider
+│   ├── tools/
+│   │   ├── __init__.py
+│   │   └── builtin.py              # 内置工具(file/shell/...),函数式
+│   └── cli.py                      # 入口: prism / prism daemon
+└── tests/
+    ├── test_agent.py
+    ├── test_guardrail.py
+    ├── test_backends.py
+    └── ...
+```
+
+### 继承关系树
+
+```
+可插拔后端(ABC 接口,核心依赖它们,实现任意替换)
+│
+├── RuntimeBackend ─────── 控制内核进程生命周期
+│   ├── LocalRuntime          本地直跑(进程会死,纯落盘恢复)
+│   └── DaemonRuntime         daemon 常驻(进程不死,免恢复)
+│
+├── MemoryBackend ──────── 语义记忆 / 检索
+│   ├── Mem0Memory            mem0 实现
+│   ├── FileMemory            纯文件 / 简单检索
+│   └── NullMemory            无记忆(可彻底拔掉)
+│
+├── DocStore ───────────── 结构性文档(可读、可交接)
+│   └── MarkdownDocStore      markdown 落盘
+│
+└── ModelBackend ───────── LLM 接入
+    ├── OpenAIModel
+    ├── ClaudeModel
+    └── LocalModel
+
+核心类(不可插拔,prism 本质)
+│
+├── Agent ──────────────── agent 对象 + 内循环
+│      (子 agent 是同 Agent 实例,配置不同,不分子类)
+│
+├── Kernel ─────────────── IPython 内核封装
+│      (持有 RuntimeBackend —— 这是它唯一的可插拔依赖)
+│
+├── Session ────────────── 会话 / 长任务会话
+│   ├── InteractiveSession     前台交互(阻塞主线程)
+│   └── BackgroundSession      后台长任务(threading,不阻塞)
+│
+└── Guardrail ──────────── 硬护栏(硬编码,无继承)
+       (PROTECTED 路径/操作写死,不靠 LLM)
+```
+
+### 核心类 · 函数签名
+
+```python
+# ── prism/core/agent.py ──────────────────────────
+class Agent:
+    def __init__(self, name: str, model: ModelBackend, *,
+                 tools: list[callable] | None = None,
+                 memory: MemoryBackend | None = None,
+                 guardrail: Guardrail | None = None,
+                 kernel: "Kernel" | None = None): ...
+
+    def run(self, user_input: str) -> str:
+        """主交互循环: 输入 → LLM → 工具 → 产出。输入即授权,不二次确认。"""
+
+    def spawn(self, name: str, **overrides) -> "Agent":
+        """spawn 子 agent。同进程,自动注册到 kernel 命名空间,可通讯。"""
+
+    def send(self, target: "Agent", message) -> None:
+        """agent 间通讯(同进程对象间调用)。"""
+
+    def register_tool(self, func: callable) -> None:
+        """加能力。IPython 运行时即时生效,不重启(灵活来源)。"""
+
+    def recall(self, query: str, k: int = 5) -> list:
+        """从 memory retrieve。memory 可拔(NullMemory 时返回空)。"""
+
+    def _loop(self):
+        """内循环: LLM 决策 → 调工具(过 Guardrail) → 回 LLM → 产出。"""
+
+
+# ── prism/core/kernel.py ─────────────────────────
+class Kernel:
+    def __init__(self, runtime: RuntimeBackend): ...
+
+    def start(self) -> None:
+        """启动 IPython 内核(走 runtime,本地或 daemon)。"""
+
+    def execute(self, code: str):
+        """在命名空间执行任意代码 —— 灵活机制的来源(原则 4)。"""
+
+    def register(self, name: str, obj) -> None:
+        """注册对象(agent / 工具)到命名空间,供其他对象访问/通讯。"""
+
+    def get(self, name: str): ...
+    def list_agents(self) -> list["Agent"]: ...
+
+
+# ── prism/core/session.py ────────────────────────
+class Session:
+    def __init__(self, agent: Agent, background: bool = False): ...
+    def run(self, user_input): ...
+    def is_alive(self) -> bool: ...
+    def result(self):
+        """取后台会话结果(BackgroundSession 用)。"""
+
+class InteractiveSession(Session): ...   # 前台,阻塞
+class BackgroundSession(Session): ...    # 后台,threading,不阻塞主交互
+
+
+# ── prism/core/guardrail.py ──────────────────────
+class Guardrail:
+    # 硬编码:破坏 agent 自身运作的操作(原则 2)
+    PROTECTED_PATHS = [
+        "<prism 安装目录>",       # agent 可执行文件 / 配置
+        "<state 目录>",           # 会话状态 / 记忆 / journal
+        "<runtime / 依赖>",       # Python / 包
+        "<工作目录根>",           # 删了 agent 失能(精确到根,非任意文件)
+        "<API 凭证路径>",
+    ]
+
+    def check(self, operation) -> bool:
+        """True=放行, False=拦截。机械识别,不调 LLM。"""
+
+    def block_reason(self, operation) -> str | None:
+        """被拦时返回原因(只护 agent 自身,不是保护用户)。"""
+```
+
+### 后端接口 · 函数签名
+
+```python
+# ── prism/backends/runtime.py ────────────────────
+class RuntimeBackend(ABC):
+    @abstractmethod
+    def start_kernel(self) -> "Kernel": ...
+    @abstractmethod
+    def is_persistent(self) -> bool:
+        """daemon=True(进程不死) / local=False(进程会死)。"""
+
+class LocalRuntime(RuntimeBackend): ...     # 本地直接起 IPython
+class DaemonRuntime(RuntimeBackend): ...    # tmux / systemd --user / nohup+setsid
+
+
+# ── prism/backends/memory.py ────────────────────
+class MemoryBackend(ABC):
+    @abstractmethod
+    def add(self, content, metadata: dict | None = None) -> str: ...
+    @abstractmethod
+    def search(self, query: str, k: int = 5) -> list: ...
+    @abstractmethod
+    def all(self) -> list: ...
+
+class Mem0Memory(MemoryBackend): ...    # mem0 语义检索
+class FileMemory(MemoryBackend): ...    # 纯文件 + 简单检索
+class NullMemory(MemoryBackend): ...    # 无记忆(可彻底拔掉 mem0)
+
+
+# ── prism/backends/docstore.py ──────────────────
+class DocStore(ABC):
+    @abstractmethod
+    def append(self, doc_id: str, entry: str) -> None: ...
+    @abstractmethod
+    def read(self, doc_id: str) -> str: ...
+    @abstractmethod
+    def list_docs(self) -> list[str]: ...
+
+class MarkdownDocStore(DocStore): ...   # .md 落盘,探索日志/决策记录/当前状态
+
+
+# ── prism/backends/model.py ─────────────────────
+class ModelBackend(ABC):
+    @abstractmethod
+    def chat(self, messages: list, tools: list | None = None) -> "Response": ...
+
+class OpenAIModel(ModelBackend): ...
+class ClaudeModel(ModelBackend): ...
+class LocalModel(ModelBackend): ...     # vLLM / llama.cpp / ollama
+```
+
+### 模块职责一句话
+
+| 模块 | 职责 |
+|------|------|
+| `core/agent.py` | agent 对象 + 内循环(LLM↔工具),spawn 子 agent,agent 间通讯 |
+| `core/kernel.py` | IPython 内核封装,命名空间管理,代码执行(灵活来源) |
+| `core/session.py` | 会话抽象,前台/后台(异步不阻塞) |
+| `core/guardrail.py` | 硬护栏,硬编码保护 agent 自身运作 |
+| `backends/*` | 四类可插拔后端的接口 + 实现 |
+| `tools/builtin.py` | 内置工具(函数式,IPython 运行时注册) |
+| `cli.py` | 入口:`prism`(本地)/ `prism daemon`(常驻) |
 
 ---
 
 ## 实现路线(交给 triage / plan)
 
-每个子任务带**可验收检查**。**本地优先**——先把核心层在本地跑通,daemon 作为后期可选增强。
+**本地优先**——先把核心层在本地跑通,daemon / mem0 作为可插拔选项后期接。
 
-### 阶段 0 · 本地 IPython 内核 + agent 内循环
-- [ ] 本地(任意 OS)能起 IPython 内核
-- [ ] 定义 agent 类:接收输入 → 调 LLM → 用工具 → 产出
-- [ ] 模型接入(API key、流式)
-- [ ] **验收**:本地 IPython 里实例化 agent,跟它自然语言交互一轮
+### 阶段 0 · 骨架 + 本地内核 + agent 内循环
+- [ ] 项目骨架(按目录结构)、`pyproject.toml`
+- [ ] `Kernel` + `LocalRuntime`:本地起 IPython 内核
+- [ ] `Agent` + `ModelBackend`(先接一个 provider)+ `run()` 内循环
+- [ ] **验收**:本地 `prism` 起 agent,自然语言交互一轮
 
 ### 阶段 1 · 多 agent + 同进程通讯
-- [ ] 多个 agent 对象共享命名空间
-- [ ] 主 agent 能 spawn 子 agent,子 agent 能返回结果 / 主动发消息给主 agent
-- [ ] **验收**:主 agent spawn 子 agent 干活,子 agent 结果回到主 agent
+- [ ] `Agent.spawn()` + `Kernel.register()` 命名空间共享
+- [ ] `Agent.send()` agent 间通讯
+- [ ] **验收**:主 agent spawn 子 agent 干活,结果回主 agent
 
 ### 阶段 2 · 多长任务会话(异步)
-- [ ] threading / asyncio 让长任务后台跑,不阻塞主交互
-- [ ] (注意 GIL:agent 主要是 LLM API 调用 = IO,threading 可行)
-- [ ] **验收**:开一个长任务会话跑着,主交互能继续输入、立即响应
+- [ ] `BackgroundSession`(threading)后台跑,不阻塞主交互
+- [ ] (GIL 提醒:agent 主要 LLM IO,threading 可行)
+- [ ] **验收**:开后台长任务,主交互继续输入立即响应
 
 ### 阶段 3 · 输入即授权 + 硬护栏
-- [ ] 移除一切二次确认(输入即授权)
-- [ ] 硬编码护栏:拦截破坏 agent 自身运作的操作
-  - 删 agent 可执行文件 / 配置
-  - kill agent 进程
-  - 删 agent 状态 / 记忆 / journal
-  - 删运行环境(runtime / 依赖)
-  - 删工作目录
-  - 删 API 凭证
-- [ ] **验收**:任意用户指令直接执行不问;试图删上述任一项被拦
+- [ ] 移除一切二次确认
+- [ ] `Guardrail` 硬编码 `PROTECTED_PATHS`,工具调用前过 `check()`
+- [ ] **验收**:任意指令直接执行;试图删 agent 自身任一项被拦
 
-### 阶段 4 · 持久化三件套(核心地基)
-- [ ] 周期性备份:每完成一步 / 每 N 秒 dump 一次
-- [ ] mem0 接入:agent 的语义记忆读写
-- [ ] 结构性文档:探索日志 / 决策记录 / 当前状态 写 markdown
-- [ ] **验收**:强杀进程 → 重启 → agent 从 mem0 + 文档恢复上下文,记得之前的探索
+### 阶段 4 · 持久化后端(核心地基,可插拔)
+- [ ] `DocStore` + `MarkdownDocStore`:周期性 dump 探索日志/决策/状态
+- [ ] `MemoryBackend` + 先实现 `FileMemory`(糙),再接 `Mem0Memory`
+- [ ] 周期性备份触发(每完成一步 / 每 N 秒)
+- [ ] **验收**:强杀进程 → 重启 → agent 从 DocStore + MemoryBackend 恢复
 
-### 阶段 5 · daemon 可插拔(可选增强)
-- [ ] 把"启动内核"抽象成一个接口:本地直跑 / daemon 常驻 两种实现
-- [ ] daemon 模式:远程 Linux 上 tmux/systemd/nohup 常驻,SSH detach/reattach
-- [ ] **验收**:同一套核心代码,本地模式(无daemon)和远程模式(有daemon)都能跑;切换只换启动方式,不动核心
+### 阶段 5 · 后端可插拔验证
+- [ ] 同一套核心,切换 `LocalRuntime`↔`DaemonRuntime`、`FileMemory`↔`Mem0Memory`↔`NullMemory`、不同 `ModelBackend`,只换构造注入,不动核心
+- [ ] `DaemonRuntime`:远程 Linux daemon 常驻 + SSH detach/reattach
+- [ ] **验收**:四种后端各自可独立替换;`NullMemory` 也能跑(证明 mem0 真的可拔)
 
 ### 阶段 6 · 跨会话传递验证(回检原始痛点)
-- [ ] 复现用户原始痛点:开 agent A 探索方案 → spawn 子 B 验证 → 关进程 → 重开
-- [ ] **验收**:无 daemon(纯落盘恢复)和有 daemon 两种模式,新会话都能 retrieve 到 A/B 的结论、卡点、下一步;信息**可传递**,不只是"不丢"
+- [ ] 复现原始痛点:开 agent A 探索 → spawn 子 B 验证 → 关进程 → 重开
+- [ ] **验收**:有/无 daemon、有/无 mem0 各种组合,新会话都能拿到 A/B 的结论、卡点、下一步
 
 ---
 
 ## 开放问题 / 风险
 
-1. **多 agent 共享 mem0 vs 各管各的** — agent 间的信息是共享一个 mem0 库(任意 agent 可 retrieve 任意记忆),还是各有各的?影响"信息怎么在 agent 间流动"。**建议:先共享,简单。** 出现混乱再分。
-2. **结构性文档的格式** — 用什么结构组织?tree.md 式?设计文档式?决策记录式?**建议:从最糙开始(一个 markdown,追加时间戳条目),用着演化。**
-3. **异步 + 同进程的张力** — IPython 内核单线程消息处理,长任务靠线程。要确认线程模型在 LLM IO 密集场景下不踩坑。**建议:阶段 2 先 spike 验证。**
-4. **硬护栏的"破坏 agent 自身"边界** — 工作目录算 agent 自身(删了 agent 失能),但用户正常工作也会改/删工作目录里的文件。护栏要精确:拦的是"删整个工作目录 / 删 agent 赖以运行的根",不是拦"工作目录里的任何文件操作"。**实现时要精确划定。**
-5. **无 daemon 模式的恢复开销** — 纯落盘恢复,重启时要重建多少状态?恢复延迟可接受吗?这决定"本地模式"够不够日常用,还是日常用必须上 daemon。**建议:阶段 4 验证恢复速度,再决定 daemon 是不是日常必需。**
-6. **跟 pi 的关系** — prism 完全自搓,与本地 pi 并行。用户本地那套(skill库/Hermes/Obsidian)与 prism 不通。这是用户已知并接受的代价。
+1. **多 agent 共享 MemoryBackend vs 各管各的** — 共享一个 memory 库 vs 各有各的?**建议:先共享,简单。** 混乱再分。
+2. **结构性文档(DocStore)的格式** — tree.md 式?决策记录式?**建议:从最糙开始(追加时间戳条目),用着演化。**
+3. **异步 + 同进程的张力** — IPython 内核单线程消息处理,长任务靠线程。**建议:阶段 2 先 spike 验证 GIL 在 LLM IO 场景不踩坑。**
+4. **硬护栏"工作目录根"的精确边界** — 工作目录算 agent 自身(删了失能),但用户正常工作也改工作目录文件。护栏要精确到"删整个根",不是"任意文件操作"。**实现时划定。**
+5. **无 daemon 模式的恢复开销** — 纯落盘恢复,重启重建多少状态?延迟可接受吗?**建议:阶段 4 验证恢复速度,再决定 daemon 是不是日常必需。**
+6. **NullMemory 时跨会话传递退化到什么程度** — mem0 拔掉后,只剩 DocStore(markdown)。这够不够"传递"?**建议:阶段 5/6 验证纯 DocStore 模式的传递质量。**
+7. **跟 pi 的关系** — prism 完全自搓,与本地 pi 并行。用户本地那套(skill库/Hermes/Obsidian)与 prism 不通。已知并接受。
 
 ---
 
 ## Werden 流程元数据
 
 - 种子轮次:用户抛"ipython 跨会话 agent 交互"
-- 诘问轮数:10 轮
+- 诘问轮数:11 轮
 - 关键转折:用户否 demo(教训:形态押注必须在思路厘清后)
 - 终止:用户明确"生成计划文档吧"
-- 项目身份演化:superharness 普通分支 → 独立仓库 prism(用户纠正:不同项目不该同仓库普通分支)
+- 项目身份演化:superharness 普通分支 → 独立仓库 prism(不同项目不该同仓库普通分支)
 - 命名:prism(棱镜分光 = 一内核分多会话/多agent;被 prime 启发,致敬 pi 简洁)
-- 设计修正:daemon 可插拔(第10轮,用户修正——daemon 从命脉降为可选,落盘层升核心,本地/远程都能跑)
+- 设计修正:① daemon 可插拔 ② mem0 可插拔 → 提炼为**后端全可插拔(依赖接口)**
+- 工程下沉:第11轮,用户要求暴露目录结构/类/函数/继承树
 - 产出:本计划文档(交 triage / plan 执行,非直接写代码)
