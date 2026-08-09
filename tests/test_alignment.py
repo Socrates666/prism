@@ -90,3 +90,55 @@ def test_subscribe_receives_events_and_unsubscribe():
     seen_before = len(seen)
     a.run("again")
     assert len(seen) == seen_before                                # 取消后不再收
+
+
+# ── D5: retry / thinking / compaction ──────────────────
+class FlakyModel:
+    """第一次 chat_stream 抛异常, 第二次成功。"""
+    def __init__(self):
+        self.calls = 0
+    def chat_stream(self, messages, tools=None):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("transient")
+        yield {"type": "delta", "text": "recovered"}
+        yield {"type": "done", "tool_calls": []}
+
+
+class SummaryModel:
+    def chat_stream(self, m, tools=None):
+        yield {"type": "done", "tool_calls": []}
+    def chat(self, messages):
+        return "SUMMARY"
+
+
+def test_retry_recovers_after_transient_error():
+    retries = []
+    a = Agent("a", model=FlakyModel(), max_retries=2)
+    a.subscribe(lambda e: retries.append(e.get("type")))
+    a.run("go")
+    assert a.last_result == "recovered"                            # 重试后成功
+    assert "auto_retry_start" in retries                          # 对齐 pi auto_retry 事件
+
+
+def test_retry_gives_up_after_max():
+    a = Agent("a", model=FlakyModel(), max_retries=0)             # 不重试
+    with pytest.raises(RuntimeError):
+        a.run("go")
+
+
+def test_thinking_level_settable():
+    a = Agent("a", model=FakeModel([]))
+    assert a.thinking_level == "off"
+    a.set_thinking_level("high")
+    assert a.thinking_level == "high"
+
+
+def test_compact_replaces_messages_with_summary():
+    a = Agent("a", model=SummaryModel())
+    a.messages = [{"role": "user", "content": "long convo"},
+                  {"role": "assistant", "content": "..."}]
+    s = a.compact()
+    assert s == "SUMMARY"
+    assert len(a.messages) == 1                                   # 压成一条
+    assert "SUMMARY" in a.messages[0]["content"]

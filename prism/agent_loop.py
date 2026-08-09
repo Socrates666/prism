@@ -51,7 +51,8 @@ def _to_schema(tool: Tool) -> dict:
 def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool],
                    emit: EventSink, *, abort: threading.Event | None = None,
                    max_turns: int = 20, history: list[dict] | None = None,
-                   patches: PatchRegistry | None = None) -> list[dict]:
+                   patches: PatchRegistry | None = None,
+                   max_retries: int = 0) -> list[dict]:
     """function-calling agent loop。返回本次累积的 messages(含 system)。
 
     patches=None 时建一个空 PatchRegistry(no-op), 行为与无 patch 完全一致。
@@ -83,21 +84,33 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
             break
         _emit({"type": "turn_start"})
 
-        # ── stream_response 点(before/after) ──
+        # ── stream_response 点(before/after) + retry(对齐 pi auto_retry) ──
         ctx_stream = {"messages": messages, "tools": tools}
         patches.run_before("stream_response", ctx_stream)
         _emit({"type": "message_start"})          # 对齐 pi: assistant 消息开始
         text_parts: list[str] = []
         tool_calls: list[dict] = []
-        for ev in model.chat_stream(ctx_stream["messages"],
-                                    tools=[_to_schema(t) for t in ctx_stream["tools"]]):
-            if abort.is_set():
-                break
-            if ev["type"] == "delta" and ev.get("text"):
-                text_parts.append(ev["text"])
-                _emit({"type": "message_update", "delta": ev["text"]})
-            elif ev["type"] == "done":
-                tool_calls = ev.get("tool_calls") or []
+        for attempt in range(max_retries + 1):
+            try:
+                for ev in model.chat_stream(ctx_stream["messages"],
+                                            tools=[_to_schema(t) for t in ctx_stream["tools"]]):
+                    if abort.is_set():
+                        break
+                    if ev["type"] == "delta" and ev.get("text"):
+                        text_parts.append(ev["text"])
+                        _emit({"type": "message_update", "delta": ev["text"]})
+                    elif ev["type"] == "done":
+                        tool_calls = ev.get("tool_calls") or []
+                break  # 成功跳出 retry
+            except Exception as e:
+                text_parts, tool_calls = [], []    # 重置重试
+                if attempt < max_retries:
+                    _emit({"type": "auto_retry_start", "attempt": attempt + 1,
+                           "error": f"{type(e).__name__}: {e}"})
+                    continue
+                _emit({"type": "auto_retry_end", "attempts": attempt + 1, "gave_up": True,
+                       "error": f"{type(e).__name__}: {e}"})
+                raise
         full_text = "".join(text_parts)
         _emit({"type": "message_end", "text": full_text})
         patches.run_after("stream_response", ctx_stream)

@@ -79,7 +79,7 @@ class Agent:
                  append_system_prompt: list[str] | None = None,
                  namespace: dict | None = None, tools: list[Tool] | None = None,
                  max_turns: int = 20, kind: str = "main", actor: bool = True,
-                 registry=None):
+                 registry=None, max_retries: int = 0, thinking_level: str = "off"):
         self.name = name
         self.model = model
         self.kind = kind                  # "main"(完整IPython, 有python工具) / "sub"(工厂受限, 无裸exec)
@@ -101,6 +101,8 @@ class Agent:
         self.messages: list[dict] = []        # 对齐 pi Agent.state.messages
         self.streaming_message: str | None = None   # 对齐 pi: 当前流式中的文本
         self.error_message: str = ""          # 对齐 pi: 最近错误
+        self.thinking_level: str = thinking_level     # 对齐 pi thinkingLevel
+        self.max_retries: int = max_retries           # 对齐 pi retry.maxRetries
         self.hooks: dict[str, Callable] = {"emit": _default_emit}
         self.patches = PatchRegistry(self.emit)   # 五扩展点 patch 注册表(原则 11)
         self.abort = threading.Event()
@@ -197,7 +199,7 @@ class Agent:
         msgs = run_agent_loop(
             self.model, self.system_prompt, user_input, self._tools(),
             self.emit, abort=self.abort, max_turns=self.max_turns,
-            history=self.messages, patches=self.patches,
+            history=self.messages, patches=self.patches, max_retries=self.max_retries,
         )
         for m in reversed(msgs):
             if m.get("role") == "assistant" and m.get("content"):
@@ -242,3 +244,21 @@ class Agent:
     def stop(self) -> None:
         """请求中止当前 run。"""
         self.abort.set()
+
+    # ── 对齐 pi: thinking / compaction ─────────────────
+    def set_thinking_level(self, level: str) -> None:
+        """对齐 pi thinkingLevel(off/minimal/low/medium/high/xhigh/max)。model 层按需接入。"""
+        self.thinking_level = level
+
+    def compact(self, instructions: str = "") -> str:
+        """对齐 pi compact(): 把 messages 压成摘要, 替换历史, 释放上下文。返回摘要。"""
+        if not self.messages:
+            return ""
+        rendered = "\n\n".join(f"[{m.get('role')}] {m.get('content', '')}" for m in self.messages)
+        prompt = ("把以下对话压成简洁的上下文摘要, 保留关键事实/决策/待办, 供后续继续。"
+                  + (f"\n额外要求: {instructions}" if instructions else "")
+                  + f"\n\n{rendered}")
+        summary = self.model.chat([{"role": "user", "content": prompt}])
+        self.messages = [{"role": "user", "content": f"[之前对话摘要]\n{summary}"}]
+        self.last_result = summary
+        return summary
