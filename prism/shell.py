@@ -21,6 +21,24 @@ class Transcript(RichLog):
     can_focus = False
 
 
+class ThemeCtl:
+    """theme 控制器(阶段12): 暴露给 agent namespace, 跨线程切主题。
+
+    治 theme namespace gap(开放问题 #16): agent 能 `theme.set("nord")`。
+    """
+    def __init__(self, app: "PrismApp"):
+        self._app = app
+
+    def set(self, name: str) -> None:
+        self._app.call_from_thread(self._apply, name)
+
+    def _apply(self, name: str) -> None:
+        self._app.theme = name
+
+    def list(self) -> list:
+        return sorted(getattr(self._app, "available_themes", {}).keys())
+
+
 CSS = """
 Screen { layout: vertical; }
 #transcript { height: 1fr; border: solid $accent; padding: 0 1; }
@@ -106,6 +124,7 @@ class PrismApp(App):
         # 建 main agent(接 registry → ext/ 的 tool 可用, 如 web_search)
         self.agent = Agent("main", model=OpenAIModel(), kind="main", registry=default_registry)
         self.agent.hooks["emit"] = emit
+        self.agent.namespace["theme"] = ThemeCtl(self)   # theme 自举口子(阶段12, 治 #16)
         log.write("[bold]prism[/bold] — 全屏 TUI(抄 pi transcript+dock)\n")
         if default_registry.tools():
             log.write("工具: " + "  ".join(f"[cyan]{t.name}[/]" for t in default_registry.tools()) + "\n")
@@ -167,6 +186,34 @@ class PrismApp(App):
                 log.write(f"[red]{type(e).__name__}: {e}[/]")
             for line in buf.getvalue().splitlines():
                 log.write(line)
+
+    def make_subagent_emit(self, name: str):
+        """给子 agent 的 emit(阶段12): 事件汇入主 transcript, 带 [name] 前缀。"""
+        log = self.query_one("#transcript", RichLog)
+        app = self
+        buf: list[str] = []
+
+        def flush() -> None:
+            if buf:
+                app.call_from_thread(log.write, f"[dim][{name}][/dim] " + "".join(buf))
+                buf.clear()
+
+        def emit(event: dict) -> None:
+            t = event.get("type")
+            if t == "message_update":
+                buf.append(event.get("delta", ""))
+            elif t == "message_end":
+                flush()
+            elif t == "tool_execution_start":
+                flush()
+                app.call_from_thread(log.write, f"[dim][{name}] → {event.get('tool_name')}[/]")
+            elif t == "tool_execution_end":
+                mark = "✗" if event.get("is_error") else "✓"
+                app.call_from_thread(log.write, f"[dim][{name}]   {mark} {str(event.get('result', ''))[:150]}[/]")
+            elif t == "error":
+                flush()
+                app.call_from_thread(log.write, f"[red][{name}] error: {event.get('error')}[/]")
+        return emit
 
 
 def main() -> None:
