@@ -50,7 +50,8 @@ def make_file_tools(ws) -> list[Tool]:
 
 
 def spawn(name: str, model, *, file_tools: bool = True, tools: list[Tool] | None = None,
-          emit: Callable[[dict], None] | None = None, workspaces_root: str = "workspaces"):
+          emit: Callable[[dict], None] | None = None, workspaces_root: str = "workspaces",
+          parent=None):
     """生产一个子 agent(原则 13/14)。
 
     - 独占 workspace=workspaces_root/<name>/; 已存在 → ValueError(不重复)
@@ -74,4 +75,6 @@ def spawn(name: str, model, *, file_tools: bool = True, tools: list[Tool] | None
     agent.workspace = ws
     if emit is not None:
         agent.hooks["emit"] = emit
+    if parent is not None:
+        parent.namespace[name] = agent   # 父 agent 能 inject/读子 agent(原则 16)
     return agent
