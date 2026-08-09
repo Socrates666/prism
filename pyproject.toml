@@ -9,6 +9,9 @@ dependencies = [
     "textual>=0.40",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 prism = "prism.shell:main"
 
