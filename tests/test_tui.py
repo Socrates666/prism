@@ -50,7 +50,7 @@ def test_tui_empty_at_message_no_crash():
     async def run():
         async with PrismApp().run_test() as pilot:
             dock = pilot.app.query_one("#dock", Input)
-            dock.value = "@main"                           # 空消息
+            dock.value = "@Prism"                           # 空消息
             await pilot.press("enter")
             await pilot.pause()
             assert pilot.app.is_running
@@ -95,16 +95,16 @@ def test_tui_python_exec_sets_namespace():                    # Python 输入→
     asyncio.run(run())
 
 
-def test_tui_at_main_runs_with_fake_model():                  # @main→inject→actor 跑(fake model)
+def test_tui_at_prism_runs_with_fake_model():                # @Prism→inject→actor 跑(fake model)
     async def run():
         async with PrismApp().run_test() as pilot:
             app = pilot.app
-            app.agent.model = FakeModel([("main-reply", [])])   # 避免真 LLM
+            app.agent.model = FakeModel([("prism-reply", [])])   # 避免真 LLM
             dock = app.query_one("#dock", Input)
-            dock.value = "@main hi"
+            dock.value = "@Prism hi"
             await pilot.press("enter")
             for _ in range(50):
                 await pilot.pause(0.05)
                 if app.agent.last_result: break
-            assert app.agent.last_result == "main-reply"
+            assert app.agent.last_result == "prism-reply"
     asyncio.run(run())

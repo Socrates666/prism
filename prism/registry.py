@@ -23,7 +23,7 @@ class Registry:
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
-        self._prompts: dict[str, str] = {}
+        self._prompts: dict[str, object] = {}
         self._skills: dict[str, object] = {}
 
     # ── tools ──

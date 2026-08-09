@@ -51,6 +51,7 @@ class PrismApp(App):
     """prism 全屏 TUI(transcript + dock)。"""
 
     CSS = CSS
+    TITLE = "Prism"
 
     def __init__(self) -> None:
         super().__init__()
@@ -124,7 +125,10 @@ class PrismApp(App):
         self.commands = load_commands("ext", emit=emit)
         # 建 main agent(接 registry → ext/ 的 tool 可用, 如 web_search)
         memory = FileMemory(".prism/memory")
-        self.agent = Agent("main", model=OpenAIModel(), kind="main", registry=default_registry, memory=memory)
+        self.agent = Agent("Prism", model=OpenAIModel(), kind="main", registry=default_registry, memory=memory)
+        sections = default_registry.get_prompt("prism")
+        if sections:
+            self.agent.apply_prompt(sections, "Prism", "main")   # ext/prompts/ 注入(原则 12, 配置外部化)
         self.agent.hooks["emit"] = emit
         self.agent.namespace["theme"] = ThemeCtl(self)   # theme 自举口子(阶段12, 治 #16)
         log.write("[bold]prism[/bold] — 全屏 TUI(抄 pi transcript+dock)\n")

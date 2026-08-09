@@ -93,7 +93,7 @@ class Agent:
         elif system_prompt:
             self.prompt.set_override(system_prompt)   # 自定义 system_prompt = 整体(兼容)
         else:
-            self._fill_default_prompt(name, kind)
+            pass  # 默认段由人格插件(ext/prompts/)注入, base 不硬编码(原则 12)
         for ap in (append_system_prompt or []):
             self.prompt.add_extra(ap)
         self.namespace = namespace if namespace is not None else _user_ns()
@@ -130,67 +130,18 @@ class Agent:
         """结构化 system prompt 渲染(阶段13, 各段组合)。"""
         return self.prompt.render()
 
-    def _fill_default_prompt(self, name: str, kind: str) -> None:
-        """默认各段(按 kind: main 完整IPython / sub 工厂受限)。
-
-        主 agent prompt 融入 RLM(Recursive Language Model, arXiv:2512.24601) 理念:
-        LLM 是 CPU, 上下文窗口是 RAM, 环境变量是 Disk。主动管理认知状态。
+    def apply_prompt(self, sections: dict, name: str | None = None, kind: str = "main") -> None:
+        """从 ext/prompts/ 人格插件填充 prompt 段(配置外部化, 原则 12)。
+        sections = {"main": {...段}, "sub": {...}}, role 支持 {name} 占位。
         """
+        sec = sections.get(kind, sections.get("main", {}))
         p = self.prompt
-        if kind == "main":
-            p.role = f"你是 {name}, prism 里的主 agent。"
-            p.environment = (
-                "prism 是 textual 全屏 TUI(agent harness), 你跑在 IPython 内核里"
-                "(有图形界面, 不是纯命令行)。用户通过 @ 消息跟你对话, "
-                "你也能看到用户直接敲的 Python。回复流式显示在 transcript。"
-            )
-            p.capabilities = (
-                "- **python 工具**: 在共享命名空间执行 Python 代码(创建变量/操作对象/"
-                "调标准库/改自己 system_prompt)。这是你的核心能力。\n"
-                "- **web_search 工具**: 网络搜索(Bing), 返回标题、链接和摘要。\n"
-                "- **增量扩建**: `add_patch(point, fn, kind=)` 五扩展点 patch; "
-                "`add_tool(tool)` 加新工具。不改 prism/ 核心。\n"
-                "- **子 agent 工厂**: `spawn(name, model, ...)` 生产受限子 agent"
-                "(无裸 exec, 工厂赋予工具, workspace=workspaces/<name>/)。\n"
-                "- **多 agent 通讯**: `inject(msg)` 递条子(异步), "
-                "读 `b.messages`/`b.last_result`(eventual)。\n"
-                "- **ext/ 可变区**: ext/tools/ ext/skills/ ext/commands/ 人格插件, "
-                "热插拔, 容错降级。"
-            )
-            p.instructions = (
-                "## RLM 大脑: 主动管理认知状态\n\n"
-                "你是一个递归语言模型(RLM)的实现。核心思想:\n"
-                "- **上下文窗口是 RAM, 不是 Disk。** 有限且昂贵, 不该塞满。\n"
-                "- **环境是外部存储。** 命名空间变量/文件/ext/ 是跨调用持久记忆。\n"
-                "- **你是 CPU, 主动搬运数据。** 不被动等待, 主动读/处理/写回。\n"
-                "- **递归: spawn 子 agent 分治大任务。**\n"
-                "- **对抗上下文腐烂: 定期 compact() + 持久化关键状态。**\n\n"
-                "### 你应该主动做的事\n"
-                "1. **维护大脑状态**: 用命名空间变量保存跨轮次关键信息。\n"
-                "2. **自我更新 system_prompt**: 认知到新能力/限制时更新自己。\n"
-                "3. **compact 时机**: 对话历史变长时主动 compact。\n"
-                "4. **任务分解**: 复杂任务 spawn 子 agent 并行/分治。\n\n"
-                "输入即授权(不二次确认)。"
-            )
-            p.guidelines = (
-                "简洁、直接、准确。不确定就说不确定, 不要编造能力或环境。\n"
-                "主动管理认知状态: 不依赖上下文窗口记住一切, "
-                "用环境变量持久化关键信息。\n"
-                "完成时不再调用工具, 直接回答。"
-            )
-        else:
-            p.role = f"你是 {name}, prism 里的子 agent。"
-            p.environment = "你跑在独占 workspace(workspaces/<name>/)。"
-            p.capabilities = (
-                "你有文件工具(read/write/ls, 绑定 workspace), 无裸 exec python 工具。"
-            )
-            p.instructions = (
-                "通过 inject 接收任务(inbox), 处理完结果在 last_result/messages。"
-            )
-            p.guidelines = (
-                "简洁、直接、准确。不确定就说不确定, 不要编造能力或环境。"
-                "完成时不再调用工具, 直接回答。"
-            )
+        for k in ("role", "environment", "capabilities", "instructions", "guidelines"):
+            if k in sec:
+                val = sec[k]
+                if name and isinstance(val, str) and "{name}" in val:
+                    val = val.format(name=name)
+                setattr(p, k, val)
 
     def append_to_system_prompt(self, text: str) -> None:
         """自由追加 system prompt(进 extra 段, 对齐 pi appendSystemPromptOverride)。"""

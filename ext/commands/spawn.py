@@ -16,7 +16,11 @@ def run(args, ctx):
     app = ctx["app"]
     try:
         emit = app.make_subagent_emit(name)
-        spawn(name, OpenAIModel(), emit=emit, parent=ctx["agent"])
+        from prism.registry import default_registry
+        bob = spawn(name, OpenAIModel(), emit=emit, parent=ctx["agent"])
+        sections = default_registry.get_prompt("prism")
+        if sections:
+            bob.apply_prompt(sections, name, "sub")
         return (f"✓ 子 agent {name} 已 spawn\n"
                 f"  workspace = workspaces/{name}/\n"
                 f"  emit 汇入主 transcript(带 [{name}] 前缀)\n"

@@ -56,16 +56,31 @@ def test_system_prompt_override_replaces_base():
     assert a.system_prompt == "OVERRIDE ONLY"
 
 
-def test_append_system_prompt_extends_base():
+def test_append_system_prompt_extends():
     a = Agent("a", model=FakeModel([]), append_system_prompt=["Extra 1", "Extra 2"])
-    assert "Extra 1" in a.system_prompt and "Extra 2" in a.system_prompt
-    assert "prism" in a.system_prompt                              # base 仍在
+    sp = a.system_prompt
+    assert "Extra 1" in sp and "Extra 2" in sp            # 默认段空(base 不硬编码), append 进 extra
 
 
 def test_append_to_system_prompt_runtime():
     a = Agent("a", model=FakeModel([]))
     a.append_to_system_prompt("LATE RULE")
     assert "LATE RULE" in a.system_prompt
+
+
+def test_apply_prompt_fills_sections():
+    """配置外部化(原则 12): ext/prompts/ 人格插件注入 prompt 段(四类之一)。"""
+    from prism.registry import Registry, load_ext
+    r = Registry()
+    load_ext("ext", r)
+    sections = r.get_prompt("prism")
+    assert sections is not None
+    a = Agent("Prism", model=FakeModel([]))
+    assert a.system_prompt == ""                       # base 不硬编码(空)
+    a.apply_prompt(sections, "Prism", "main")
+    assert "Prism" in a.system_prompt and "## 角色" in a.system_prompt
+    assert "python 工具" in a.system_prompt            # capabilities
+    assert "RLM" in a.system_prompt                    # instructions(RLM 理念)
 
 
 # ── D4: inject steer/followUp + subscribe ──────────────
