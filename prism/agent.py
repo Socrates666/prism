@@ -75,7 +75,8 @@ class Agent:
 
     def __init__(self, name: str, model, *, system_prompt: str = "",
                  namespace: dict | None = None, tools: list[Tool] | None = None,
-                 max_turns: int = 20, kind: str = "main", actor: bool = True):
+                 max_turns: int = 20, kind: str = "main", actor: bool = True,
+                 registry=None):
         self.name = name
         self.model = model
         self.kind = kind                  # "main"(完整IPython, 有python工具) / "sub"(工厂受限, 无裸exec)
@@ -95,6 +96,8 @@ class Agent:
         self.patches = PatchRegistry(self.emit)   # 五扩展点 patch 注册表(原则 11)
         self.abort = threading.Event()
         self._extra_tools: list[Tool] = list(tools or [])
+        if registry is not None:
+            self._extra_tools += registry.tools()    # 全局共享池的 tool(原则 12)
         self.workspace = None             # 子 agent 由 spawn 设(原则14)
         # ── actor(原则15): inbox + 线程 ──
         self.inbox: queue.Queue | None = queue.Queue() if actor else None
