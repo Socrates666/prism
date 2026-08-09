@@ -61,7 +61,7 @@ class OpenAIModel(ModelBackend):
             if tcs:
                 for tc in tcs:
                     idx = tc.index if tc.index is not None else 0
-                    slot = tc_acc.setdefault(idx, {"id": None, "function": {"name": "", "arguments": ""}})
+                    slot = tc_acc.setdefault(idx, {"id": None, "type": "function", "function": {"name": "", "arguments": ""}})
                     if tc.id:
                         slot["id"] = tc.id
                     if tc.function:

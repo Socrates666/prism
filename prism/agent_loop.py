@@ -69,9 +69,14 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
         full_text = "".join(text_parts)
         emit({"type": "message_end", "text": full_text})
 
-        asst: dict = {"role": "assistant", "content": full_text}
+        asst: dict = {"role": "assistant", "content": full_text or None}
         if tool_calls:
-            asst["tool_calls"] = tool_calls
+            # 规范化: 喂回 LLM 时每个 tool_call 必须有 type: function(openai 要求)
+            # 不依赖 model 实现是否带 type —— agent_loop 自己保证格式
+            asst["tool_calls"] = [
+                {**tc, "type": "function"} if "type" not in tc else tc
+                for tc in tool_calls
+            ]
         messages.append(asst)
 
         # 无工具调用 → 本轮结束, loop 停
