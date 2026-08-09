@@ -63,6 +63,7 @@ def test_chat_stream_accumulates_tool_call_fragments():
     m = OpenAIModel.__new__(OpenAIModel)                   # 跳过 __init__(不连网)
     m.client = FakeClient()
     m.model = "test"
+    m._first_timeout = 5.0
 
     events = list(m.chat_stream([{"role": "user", "content": "x"}], tools=[]))
     deltas = [e["text"] for e in events if e["type"] == "delta"]
@@ -84,6 +85,7 @@ def test_chat_plain_text_no_tools():
     m = OpenAIModel.__new__(OpenAIModel)
     m.client = FakeClient()
     m.model = "t"
+    m._first_timeout = 5.0
     events = list(m.chat_stream([{"role": "user", "content": "x"}]))
     assert "".join(e["text"] for e in events if e["type"] == "delta") == "hi there"
     assert events[-1]["tool_calls"] == []
