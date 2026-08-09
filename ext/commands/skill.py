@@ -15,5 +15,5 @@ def run(args, ctx):
     if not p.exists():
         return f"✗ skill 不存在: {p}"
     content = p.read_text(encoding="utf-8")
-    ctx["agent"].append_to_system_prompt(f"\n## Skill: {name}\n{content}")
-    return f"✓ skill 已注入 system prompt: {name} ({len(content)} 字)"
+    ctx["agent"].prompt.add_skill(name, content)
+    return f"✓ skill 已注入(→ ## Skills 段): {name} ({len(content)} 字)"

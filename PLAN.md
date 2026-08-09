@@ -373,6 +373,41 @@ Frontend(ABC) → TextualTui(全屏套壳)
 - [ ] **spawn 便捷路径**: `/spawn` 指令 或 main python 工具 spawn 时自动接 emit + 注册 namespace
 - [ ] **验收**: agent 运行时切主题; spawn 的 bob 输出带 `[bob]` 显示在主 transcript
 
+### 阶段 13 · 结构化 system prompt(角色/指令/准则拆分)
+
+> **设计动机**: 当前 `system_prompt` 是一整段字符串(角色/环境/能力/指令/准则混在一起)。
+> 拆成**结构化段**, 各段独立可组合/覆盖; `/goal` `/skill` 注入对应段(不再混入 extra), 
+> agent 自我描述更清晰, 也对齐 pi 的 systemPrompt 可组合性。
+
+**SystemPrompt 结构(prism/prompt.py)**:
+
+| 段 | 内容 | 来源 |
+|----|------|------|
+| `role` 角色 | 你是 {name}, prism agent(kind: main 完整IPython / sub 工厂受限) | 默认(按 kind) |
+| `environment` 环境 | prism textual TUI / IPython 内核(有图形界面) / workspace | 默认 |
+| `capabilities` 能力与工具 | python 工具(主, exec 共享 ns) / 文件工具(子, 绑 ws) / 当前 tool 列表 | 默认(按 kind + tools) |
+| `instructions` 指令 | 输入即授权(零揣测) / @ 路由对话 / 用户直接敲 Python | 默认 |
+| `guidelines` 行为准则 | 简洁直接 / 不确定就说不确定 / 不编造 / 完成时不调工具直接答 | 默认 |
+| `goal` 目标 | 当前 goal | `/goal` 注入 |
+| `skills` 技能 | 加载的 skill 列表 | `/skill` 注入 |
+| `extra` 自由追加 | 兼容旧 `append_to_system_prompt` | 运行时 |
+
+**接口**:
+```python
+class SystemPrompt:
+    def __init__(self): ...                  # 各段属性
+    def render(self) -> str                   # markdown 各段标题组合(## 角色/## 环境/...)
+    def set_override(text)                    # 整体替换(对齐 pi systemPromptOverride)
+    def set_goal(text) / add_skill(name, content) / add_extra(text)
+```
+
+- [ ] **SystemPrompt 类**: prism/prompt.py, 上表 8 段 + render/set_*/add_*
+- [ ] **Agent 接入**: `self.prompt = SystemPrompt()`; `system_prompt` 改 property → `prompt.render()`
+      - 默认各段从当前 `_base` 拆解填充(role/environment/capabilities/instructions/guidelines)
+      - `system_prompt_override` → `set_override`; `append_to_system_prompt` → `add_extra`(兼容)
+- [ ] **/goal /skill 改结构化段**: `/goal` → `prompt.set_goal`; `/skill` → `prompt.add_skill`(不再进 extra)
+- [ ] **验收**: `system_prompt` 渲染含 `## 角色` `## 指令` `## 行为准则` 等标题; `/goal` 进 goal 段; `/skill` 进 skills 段; override 整体替换生效
+
 ---
 
 ## 开放问题 / 风险

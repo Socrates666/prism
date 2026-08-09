@@ -11,5 +11,5 @@ def run(args, ctx):
     goal = args.strip()
     if not goal:
         return "用法: /goal <描述>"
-    ctx["agent"].append_to_system_prompt(f"\n## 当前 Goal\n{goal}")
-    return f"✓ 目标已设(注入 system prompt): {goal}"
+    ctx["agent"].prompt.set_goal(goal)
+    return f"✓ 目标已设(→ ## 当前目标 段): {goal}"

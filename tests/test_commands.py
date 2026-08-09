@@ -65,7 +65,7 @@ def test_cmd_thinking_off_syncs_to_model():
 def test_cmd_goal_injects_into_system_prompt():
     a = _agent()
     load_commands("ext")["goal"].run("写完所有测试", _ctx(a))
-    assert "写完所有测试" in a.system_prompt and "Goal" in a.system_prompt
+    assert "写完所有测试" in a.system_prompt and "当前目标" in a.system_prompt
 
 
 def test_cmd_skill_loads_md_into_system_prompt():

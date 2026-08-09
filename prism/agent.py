@@ -83,17 +83,17 @@ class Agent:
         self.name = name
         self.model = model
         self.kind = kind                  # "main"(完整IPython, 有python工具) / "sub"(工厂受限, 无裸exec)
-        # system prompt(对齐 pi: base + append; override 整体替换)
-        self._base_system_prompt = system_prompt or (
-            f"你是 {name}, prism 里的 agent。"
-            "prism 是一个 textual 全屏 TUI(agent harness), 你跑在它的 IPython 内核里(有图形界面, 不是纯命令行)。"
-            "你有 python 工具: 在共享命名空间执行 Python 代码(创建变量/操作对象/调标准库/改自己 system_prompt)。"
-            "用户通过 @ 消息跟你对话, 你也能看到用户直接敲的 Python。你的回复流式显示在 transcript。"
-            "简洁、直接、准确。不确定就说不确定, 不要编造自己的能力或环境。完成时不再调用工具, 直接回答。"
-        )
-        self._system_prompt_override = system_prompt_override
-        self.append_system_prompt: list[str] = list(append_system_prompt or [])
-        self.system_prompt = self._resolve_system_prompt()
+        # 结构化 system prompt(阶段13: 角色/环境/能力/指令/准则/goal/skills 拆分)
+        from .prompt import SystemPrompt
+        self.prompt = SystemPrompt()
+        if system_prompt_override is not None:
+            self.prompt.set_override(system_prompt_override)
+        elif system_prompt:
+            self.prompt.set_override(system_prompt)   # 自定义 system_prompt = 整体(兼容)
+        else:
+            self._fill_default_prompt(name, kind)
+        for ap in (append_system_prompt or []):
+            self.prompt.add_extra(ap)
         self.namespace = namespace if namespace is not None else _user_ns()
         self.namespace.setdefault(name, self)   # agent 注册进命名空间, 能被自己/别的对象操作
         self.max_turns = max_turns
@@ -122,17 +122,33 @@ class Agent:
             self._thread = threading.Thread(target=self._actor_loop, daemon=True)
             self._thread.start()
 
-    def _resolve_system_prompt(self) -> str:
-        """对齐 pi: override 整体替换; 否则 base + append。"""
-        if self._system_prompt_override is not None:
-            return self._system_prompt_override
-        parts = [self._base_system_prompt] + self.append_system_prompt
-        return "\n\n".join(p for p in parts if p).strip()
+    @property
+    def system_prompt(self) -> str:
+        """结构化 system prompt 渲染(阶段13, 各段组合)。"""
+        return self.prompt.render()
+
+    def _fill_default_prompt(self, name: str, kind: str) -> None:
+        """默认各段(按 kind: main 完整IPython / sub 工厂受限)。"""
+        p = self.prompt
+        p.role = (f"你是 {name}, prism 里的 agent"
+                  f"({'主 agent, 享完整 IPython' if kind == 'main' else '子 agent, 工厂受限'})。")
+        if kind == "main":
+            p.environment = ("prism 是 textual 全屏 TUI(agent harness), 你跑在 IPython 内核里"
+                             "(有图形界面, 不是纯命令行)。回复流式显示在 transcript。")
+            p.capabilities = ("你有 python 工具: 在共享命名空间执行 Python 代码"
+                              "(创建变量/操作对象/调标准库/改自己 system_prompt)。")
+            p.instructions = ("用户通过 @ 消息跟你对话, 你也能看到用户直接敲的 Python。"
+                              "输入即授权(不二次确认)。")
+        else:
+            p.environment = "你是子 agent, 跑在独占 workspace(workspaces/<name>/)。"
+            p.capabilities = "你有文件工具(read/write/ls, 绑定 workspace), 无裸 exec python 工具。"
+            p.instructions = "通过 inject 接收任务(inbox), 处理完结果在 last_result/messages。"
+        p.guidelines = ("简洁、直接、准确。不确定就说不确定, 不要编造能力或环境。"
+                        "完成时不再调用工具, 直接回答。")
 
     def append_to_system_prompt(self, text: str) -> None:
-        """运行时追加 system prompt(对齐 pi appendSystemPromptOverride)。"""
-        self.append_system_prompt.append(text)
-        self.system_prompt = self._resolve_system_prompt()
+        """自由追加 system prompt(进 extra 段, 对齐 pi appendSystemPromptOverride)。"""
+        self.prompt.add_extra(text)
 
     def emit(self, event: dict) -> None:
         """emit 点: 跟踪 streaming_message/error_message(对齐 pi state) + 转 hooks。"""
