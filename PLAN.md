@@ -272,7 +272,24 @@ Frontend(ABC) → TextualTui(全屏套壳)
 ### ✓ 阶段 0 · 骨架 + 本地内核 + REPL + function-calling loop
 - [x] agent_loop.py(function calling + 事件流)/ model.py(chat_stream)/ @ 路由 / .env
 
-### ✓ 阶段 1 · textual TUI 套壳(原则 8 升级)
+### ✓ 阶段 1 · 对齐 pi agent 基线(语义 + prompt, 用户定)★
+
+**详见 [docs/alignment-pi.md](docs/alignment-pi.md)** —— 对齐审计(偏离项 + 增量映射)。
+
+**语言鸿沟**: pi = TS SDK, prism = Python(IPython 核心)。“严格对齐” = 语义/行为/prompt 对齐, 非 SDK 复用。prism 是 pi agent 的 Python 增量实现。
+
+**偏离修正(全部完成, test_alignment 验收)**:
+- [x] D1 事件命名对齐 pi(message_update·delta / message_start / tool_execution_start/end)
+- [x] D2 state 命名对齐(history→messages; 补 streaming_message/error_message)
+- [x] D3 system prompt override/append 机制(_resolve_system_prompt / append_to_system_prompt)
+- [x] D4 inject 区分 steer/followUp(PriorityQueue 优先级) + 显式 subscribe
+- [x] D5 retry(auto_retry 事件) + thinking_level + compact()
+
+**增量(建在 pi 基础上, 已审计)**: 多agent actor / patch五点 / workspace闭包 / guard护栏 / @路由+IPython / ext容错 / 能力分层 —— 详见 alignment-pi.md §3
+
+**验收**: D1-D5 全对齐, 71 测试绿; 增量映射清晰
+
+### ✓ 阶段 2 · textual TUI 套壳(原则 8 升级)
 - [x] textual 全屏 TUI(transcript + dock, 抄 pi)
 - [x] @ 路由挪进 TUI 输入(单行 @name → inject)
 - [x] transcript can_focus=False(点击不抢 Input 焦点)
@@ -280,66 +297,49 @@ Frontend(ABC) → TextualTui(全屏套壳)
 - [ ] **已取消**: 多 agent 输出分屏(用户定, 改单 transcript 汇入)
 - [x] **验收**: TUI 跑, @main 对话, 流式输出
 
-### ✓ 阶段 2 · actor 异步(原则 15)
+### ✓ 阶段 3 · actor 异步(原则 15)
 - [x] Agent 线程 + inbox + inject
 - [x] agent emit 跨线程到 TUI(call_from_thread)
-- [x] **验收**: 主 agent run 不冻 TUI; inject 递条子 agent 处理(跨 agent inject 待阶段 6)
+- [x] **验收**: 主 agent run 不冻 TUI; inject 递条子 agent 处理(跨 agent inject 待阶段 7)
 
-### ✓ 阶段 3 · 扩展点 patch(原则 11)
+### ✓ 阶段 4 · 扩展点 patch(原则 11)
 - [x] patch.py(PatchRegistry before/after/around + 异常降级)
 - [x] agent_loop 五点 patchable(build_messages/stream_response/execute_tools/should_stop/emit)
 - [x] Agent 持有 patches; TUI 显示 patch_error 降级
-- [x] **验收**: around patch 包裹 execute_tools 改行为(15 测试绿),不改 base(patches 缺省 no-op)
+- [x] **验收**: around patch 包裹 execute_tools 改行为,不改 base(patches 缺省 no-op)
 
-### ✓ 阶段 4 · 注册表 + 可变区(原则 12)
+### ✓ 阶段 5 · 注册表 + 可变区(原则 12)
 - [x] registry.py(Registry tool/prompt/skill + load_ext 容错) + default_registry 全局共享池
 - [x] Agent 加 registry 参数, _extra_tools += registry.tools()
-- [x] **验收**: ext/tools 丢 .py 已有 agent 能用;坏的跳过+emit(5 测试绿)
+- [x] **验收**: ext/tools 丢 .py 已有 agent 能用;坏的跳过+emit
 
-### ✓ 阶段 5 · 多 agent 工厂 + 工作区(原则 13/14)★
+### ✓ 阶段 6 · 多 agent 工厂 + 工作区(原则 13/14)★
 - [x] spawn.py(spawn 工厂 + make_file_tools 闭包绑 ws)
 - [x] workspaces/<name>/ 独占分配(已存在报错)
 - [x] 子 agent kind=sub 无裸 exec,工厂赋予工具; spawn(parent=) 注册进父 namespace
-- [x] **验收**: bob 文件操作落 workspaces/bob/,不踩主 agent(6 测试绿)
+- [x] **验收**: bob 文件操作落 workspaces/bob/,不踩主 agent
 
-### ✓ 阶段 6 · 多 agent 通讯(原则 16)
-- [x] inject 跨 agent(actor 阶段 2 已有); spawn(parent) 让主 agent 命名空间持子 agent
-- [x] 读 eventual(直接属性访问 last_result/history)
-- [x] **验收**: 主 inject bob 干活 bob 处理; 主读 bob.last_result; inject 立即返回(5 测试绿)
+### ✓ 阶段 7 · 多 agent 通讯(原则 16)
+- [x] inject 跨 agent(actor 阶段 3 已有); spawn(parent) 让主 agent 命名空间持子 agent
+- [x] 读 eventual(直接属性访问 last_result/messages)
+- [x] **验收**: 主 inject bob 干活 bob 处理; 主读 bob.last_result; inject 立即返回
 
-### ✓ 阶段 7 · 增量扩建自我修复 + 护栏(原则 2/7/10)
+### ✓ 阶段 8 · 增量扩建自我修复 + 护栏(原则 2/7/10)
 - [x] guard.py: 包装主 agent exec 的 open, 写 prism/ 核心 → PermissionError
 - [x] Agent.add_patch(point, fn, kind) / add_tool(tool): 运行时扩建正道
 - [x] Agent.execute 用受限 builtins(open=guarded)
-- [x] **验收**: add_patch 改 react 不改 agent_loop.py; 护栏拦 prism/ 放行别处(6 测试绿)
+- [x] **验收**: add_patch 改 react 不改 agent_loop.py; 护栏拦 prism/ 放行别处
 
-### ✓ 阶段 7.5 · 白盒 + 黑盒测试(用户定, 阶段7 后做)
-- [x] **白盒**: 单元测试覆盖率 67%→85%(补 router 0%→84% / model 22%→85% / agent_loop patch 接入点); 59 测试全绿
-- [x] **黑盒**: 端到端集成(test_e2e: main→spawn→inject→workspace 全链路 + 多 agent 隔离 + 跨 agent eventual 读) + TUI Pilot(test_tui: 结构/焦点修复回归/不崩)
-- [x] **验收**: pytest 59 全绿; e2e 跑通 main→spawn→inject→workspace 全链路
+### ✓ 阶段 9 · 白盒 + 黑盒测试(用户定)
+- [x] **白盒**: 单元测试覆盖率 67%→85%(补 router/model/patch 接入点)
+- [x] **黑盒**: 端到端集成(test_e2e: main→spawn→inject→workspace) + TUI Pilot(test_tui: 结构/焦点/不崩)
+- [x] **验收**: pytest 全绿; e2e 跑通 main→spawn→inject→workspace 全链路
 
-### ▶ 阶段 7.6 · 对齐 pi agent 基线(语义 + prompt, 用户定) ← 当前
-
-**详见 [docs/alignment-pi.md](docs/alignment-pi.md)** —— 对齐审计(偏离项 + 增量映射)。
-
-**语言鸿沟**: pi = TS SDK, prism = Python(IPython 核心)。“严格对齐” = 语义/行为/prompt 对齐, 非 SDK 复用。prism 是 pi agent 的 Python 增量实现。
-
-**偏离修正(P0/P1)**:
-- [ ] D1 事件命名对齐 pi(message_update·text_delta / tool_execution_start/end)
-- [ ] D2 state 命名对齐(history→messages; 补 streaming_message/error_message)
-- [ ] D3 system prompt override/append 机制
-- [ ] D4 inject 区分 steer/followUp + 显式 subscribe
-- [ ] 增量标注: 每个增量模块 docstring 注明 "pi 基础 + prism 增量"
-
-**增量(建在 pi 基础上, 已审计)**: 多agent actor / patch五点 / workspace闭包 / guard护栏 / @路由+IPython / ext容错 / 能力分层 —— 详见 alignment-pi.md §3
-
-**验收**: 对齐审计文档 ✓ + P0 偏离修正(事件命名/prompt机制/增量标注) + 增量映射清晰
-
-### 阶段 8 · 持久化 + 后端可插拔 + daemon(原则 6/7)
+### 阶段 10 · 持久化 + 后端可插拔 + daemon(原则 6/7)
 - [ ] DocStore/MemoryBackend 周期 dump;后端切换;DaemonRuntime
 - [ ] **验收**: 强杀重启恢复;NullMemory 能跑
 
-### 阶段 9 · 跨会话传递验证
+### 阶段 11 · 跨会话传递验证
 - [ ] 复现原始痛点验收
 
 ---

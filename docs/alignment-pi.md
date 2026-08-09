@@ -69,19 +69,19 @@
 
 ---
 
-## 4 · 对齐动作清单（按风险 / 价值排序，待用户定深度）
+## 4 · 对齐动作清单（全部完成 ✅ 71 测试）
 
-**P0 低风险高价值（建议先做）**：
-- [ ] D1 事件命名对齐 pi（改 emit + 同步 59 测试）
-- [ ] D3 system prompt override/append 机制
-- [ ] 增量标注：每个增量模块 docstring 注明 "pi 基础 + prism 增量"
+**P0 低风险高价值**：
+- [x] D1 事件命名对齐 pi（message_update/tool_execution_*/message_start；同步 emit + 测试）
+- [x] D3 system prompt override/append 机制（_resolve_system_prompt / append_to_system_prompt）
+- [ ] 增量标注：每个增量模块 docstring 注明 "pi 基础 + prism 增量"（部分已标，后续 review 补全）
 
-**P1 中风险（改 API，破坏测试）**：
-- [ ] D2 state 命名对齐（history→messages 等）
-- [ ] D4 inject 区分 steer/followUp + 显式 subscribe
+**P1 中风险（改 API）**：
+- [x] D2 state 命名对齐（history→messages；补 streaming_message/error_message）
+- [x] D4 inject 区分 steer/followUp（PriorityQueue 优先级）+ 显式 subscribe
 
-**P2 大工程（功能补齐）**：
-- [ ] D5 compaction / thinking / retry（对齐 pi 完整 agent 能力）
+**P2 功能补齐**：
+- [x] D5 retry（auto_retry 事件）/ thinking_level / compact()（对齐 pi 完整 agent）
 
 **不做（语言鸿沟）**：
 - ✗ 复用 pi SDK（TS，prism 是 Python）
