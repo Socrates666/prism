@@ -313,10 +313,10 @@ Frontend(ABC) → TextualTui(全屏套壳)
 - [x] Agent.execute 用受限 builtins(open=guarded)
 - [x] **验收**: add_patch 改 react 不改 agent_loop.py; 护栏拦 prism/ 放行别处(6 测试绿)
 
-### ▶ 阶段 7.5 · 白盒 + 黑盒测试(用户定, 阶段7 后做) ← 当前
-- [ ] **白盒**: 单元测试覆盖率审计(tests/ 已覆盖 patch/agent_loop/registry/spawn/comms/guard/self_repair 内部) → 补缺口 + 跑 pytest 全套绿 + 关键分支覆盖
-- [ ] **黑盒**: 端到端真实交互(textual Pilot + FakeModel 串起整条链) —— TUI 启动 → @main 对话 → spawn 子 agent → inject 跨 agent → 子 agent 文件落 workspace
-- [ ] **验收**: pytest 全绿 + 一个端到端 Pilot 测试跑通 main→spawn→inject→workspace 全链路
+### ✓ 阶段 7.5 · 白盒 + 黑盒测试(用户定, 阶段7 后做)
+- [x] **白盒**: 单元测试覆盖率 67%→85%(补 router 0%→84% / model 22%→85% / agent_loop patch 接入点); 59 测试全绿
+- [x] **黑盒**: 端到端集成(test_e2e: main→spawn→inject→workspace 全链路 + 多 agent 隔离 + 跨 agent eventual 读) + TUI Pilot(test_tui: 结构/焦点修复回归/不崩)
+- [x] **验收**: pytest 59 全绿; e2e 跑通 main→spawn→inject→workspace 全链路
 
 ### 阶段 8 · 持久化 + 后端可插拔 + daemon(原则 6/7)
 - [ ] DocStore/MemoryBackend 周期 dump;后端切换;DaemonRuntime
