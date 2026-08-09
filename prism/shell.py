@@ -99,11 +99,17 @@ class PrismApp(App):
             else:
                 log.write(f"[red]@{name}: 命名空间没有这个 agent[/]\n")
         else:
-            # 主 agent 享完整 IPython(原则13): 直接 exec in namespace
+            # 主 agent 享完整 IPython(原则13): exec in namespace
+            # textual 全屏接管终端, exec 的 print 走 sys.stdout 会丢 → 重定向捕获写到 transcript
+            import contextlib, io
+            buf = io.StringIO()
             try:
-                exec(compile(text, "<prism>", "exec"), ns)
+                with contextlib.redirect_stdout(buf):
+                    exec(compile(text, "<prism>", "exec"), ns)
             except Exception as e:
-                log.write(f"[red]{type(e).__name__}: {e}[/]\n")
+                log.write(f"[red]{type(e).__name__}: {e}[/]")
+            for line in buf.getvalue().splitlines():
+                log.write(line)
 
 
 def main() -> None:
