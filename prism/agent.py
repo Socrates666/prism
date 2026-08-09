@@ -1,34 +1,22 @@
-"""Agent — prism 的 agent. ReAct 循环, 跑在 IPython 内核命名空间里.
+"""Agent — prism agent。function-calling loop(借鉴 prime-agent), hooks 自举显示。
 
 设计要点(对应 PLAN 原则):
-  - 输入即授权(原则 1): run() 不二次确认
-  - IPython 运行时灵活(原则 4): execute() 在共享命名空间跑任意代码
-  - 显示自举(原则 9): hooks(emit/guard) 可被 agent 自己改 → 显示方法是活的
-  - 自修改: system_prompt 运行时可变; agent 自己注册进命名空间, 能操作自己
+  - function calling(非文本 ReAct): LLM 返回结构化 tool_calls, 不解析文本
+  - 事件流(显示自举基础): emit 结构化事件, hooks["emit"] 可替换
+  - 流式: message_delta 边生成边出
+  - abort: threading.Event, run() 可被打断
+  - python 工具: 在共享命名空间执行(IPython 运行时灵活, 原则4)
+  - 自修改: agent 注册进命名空间, 能被自己操作
 """
 from __future__ import annotations
-import re
-from typing import Callable
+import threading
+from typing import Any, Callable
 
-
-REACT_INSTRUCTIONS = """\
-你可以用 ReAct 方式工作。每一步严格按此格式输出:
-
-Thought: <你的推理>
-Action: <python | finish>
-Action Input: <内容>
-
-- Action: python  → Action Input 是要在共享命名空间执行的 Python 代码。
-  你能在代码里创建变量、操作对象、甚至修改自己的 system_prompt
-  (你自己在命名空间里, 变量名就是你的 name)。
-  执行结果会作为 Observation 返回。
-- Action: finish  → Action Input 是你的最终回答, 循环结束。
-
-一次只输出一个 Action。"""
+from .agent_loop import run_agent_loop, Tool
 
 
 def _user_ns() -> dict:
-    """获取 IPython 当前 shell 的 user_ns; 没有(不在 IPython 里)就返回空 dict。"""
+    """获取 IPython 当前 shell 的 user_ns; 没有(不在 IPython 里)就空 dict。"""
     try:
         from IPython import get_ipython
         shell = get_ipython()
@@ -39,109 +27,115 @@ def _user_ns() -> dict:
     return {}
 
 
-def _parse_react(text: str) -> tuple[str, str]:
-    """从 LLM 输出解析 Action / Action Input。解析失败默认 finish。"""
-    action_m = re.search(r"Action:\s*(\S+)", text)
-    input_m = re.search(r"Action\s*Input:\s*(.*)", text, re.S)
-    action = action_m.group(1).strip().lower() if action_m else "finish"
-    action_input = input_m.group(1).strip() if input_m else text.strip()
-    return action, action_input
+def _default_emit(event: dict) -> None:
+    """默认显示: 流式文本 + 工具调用/结果。
+
+    可被 agent.hooks["emit"] 替换(显示自举, 原则9)。
+    替换后接收的是【事件 dict】, 不是 (source, chunk)。
+    """
+    t = event["type"]
+    if t == "message_delta":
+        print(event["text"], end="", flush=True)
+    elif t == "message_end":
+        if event["text"]:
+            print()  # 文本后换行
+    elif t == "tool_start":
+        print(f"  → {event['name']}({event['args']})")
+    elif t == "tool_end":
+        mark = "✗" if event["is_error"] else "✓"
+        res = str(event["result"])
+        print(f"    {mark} {res[:300]}")
+
+
+def _python_tool(agent: "Agent") -> Tool:
+    """python 工具: 在 agent 共享命名空间执行代码。"""
+    def execute(args):
+        code = args.get("code", "")
+        status, detail = agent.execute(code)
+        out = f"[{status}] {detail}".strip()
+        return out or "[ok]"
+    return Tool(
+        name="python",
+        description=(
+            "在共享命名空间执行 Python 代码。能创建变量、操作对象、"
+            "甚至修改自己的 system_prompt(你自己在命名空间里, 变量名是你的 name)。"
+            "返回执行状态。完成任务后不要再调用工具, 直接回答。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {"code": {"type": "string", "description": "要执行的 Python 代码"}},
+            "required": ["code"],
+        },
+        execute=execute,
+    )
 
 
 class Agent:
-    """prism agent。
+    """prism agent。function-calling loop。
 
     用法:
         a = Agent("alice", model=OpenAIModel())
-        a.run("把 2+2 算出来存到变量 x")   # agent 执行 python: x = 4
-        x                                     # 直接访问(共享命名空间)
-        a.system_prompt = "你只说海盗话"      # 改自己 prompt
+        a.run("算 2+2 存到变量 x")   # LLM 调 python 工具: x = 4
+        x                              # 直接访问(共享命名空间)
+        a.system_prompt = "..."        # 改 agent 自己
+        a.hooks["emit"] = my_emit      # 改显示(事件 dict)
+        a.stop()                       # 中止当前 run
     """
 
-    def __init__(self, name: str, model, *,
-                 system_prompt: str = "",
-                 namespace: dict | None = None,
-                 tools: dict[str, Callable] | None = None,
-                 max_steps: int = 8):
+    def __init__(self, name: str, model, *, system_prompt: str = "",
+                 namespace: dict | None = None, tools: list[Tool] | None = None,
+                 max_turns: int = 20):
         self.name = name
         self.model = model
         self.system_prompt = system_prompt or (
             f"你是 {name}, 一个跑在 IPython 内核里的 agent。"
-            "你能执行 Python 代码(在共享命名空间创建变量、操作对象), "
-            "也能修改自己的 system_prompt 来调整行为。简洁、直接。"
+            "用 python 工具执行代码(在共享命名空间创建变量/操作对象/改自己 system_prompt)。"
+            "简洁直接。完成时不再调用工具, 直接回答。"
         )
-        # 共享命名空间: 默认接 IPython 的 user_ns → 用户和 agent 等价(原则 8)
         self.namespace = namespace if namespace is not None else _user_ns()
-        self.tools = tools or {}
-        self.max_steps = max_steps
+        self.namespace.setdefault(name, self)   # agent 注册进命名空间, 能被自己操作
+        self.max_turns = max_turns
+        self.last_result: str = ""
         self.history: list[dict] = []
-        self.last_result: str = ""  # 最近一次 run 的最终结果(emit 已打印, 这里供程序化取用)
-        # hooks —— 显示自举的核心(原则 9): agent 能改这些来重塑显示
-        self.hooks: dict[str, Callable] = {
-            "emit": lambda source, chunk: print(f"[{source} ▸] {chunk}"),
-            "guard": lambda action, action_input: True,  # 默认放行(输入即授权)
-        }
-        # 把自己注册进命名空间 → agent 能在 python action 里操作自己(自修改)
-        self.namespace.setdefault(name, self)
+        # hooks —— 显示自举(原则9): emit 接收事件 dict, 可替换
+        self.hooks: dict[str, Callable] = {"emit": _default_emit}
+        self.abort = threading.Event()
+        self._extra_tools: list[Tool] = list(tools or [])
 
-    # ── hooks(显示自举) ───────────────────────────
-    def emit(self, chunk: str, source: str | None = None):
-        self.hooks["emit"](source or self.name, chunk)
+    def emit(self, event: dict) -> None:
+        self.hooks["emit"](event)
 
-    # ── 核心行动: 在共享命名空间执行 Python ─────────
     def execute(self, code: str) -> tuple[str, str]:
-        """agent 的核心能力。创建变量 / 操作对象 / 改自己 prompt 都靠它。"""
+        """在共享命名空间执行 Python(python 工具的底层)。"""
         try:
             exec(compile(code, f"<{self.name}>", "exec"), self.namespace)
             return ("ok", "")
         except Exception as e:
             return ("error", f"{type(e).__name__}: {e}")
 
-    # ── ReAct 循环 ─────────────────────────────────
+    def _tools(self) -> list[Tool]:
+        return [_python_tool(self)] + self._extra_tools
+
     def run(self, user_input: str) -> None:
-        """主循环: 输入 → LLM(ReAct) → 行动(python/finish) → 观察 → ...
-
-返回 None —— 显示全靠 emit hooks(原则9), 避免 IPython 把返回值当 Out[] 再打印一遍。
-最终结果存 self.last_result。"""
-        self.emit(f"← {user_input}", source="you")
-        messages = (
-            [{"role": "system",
-              "content": self.system_prompt + "\n\n" + REACT_INSTRUCTIONS}]
-            + self.history
-            + [{"role": "user", "content": user_input}]
+        """function-calling agent loop。返回 None(显示靠 emit), 结果在 last_result。"""
+        self.abort.clear()
+        self.emit({"type": "user_input", "text": user_input})
+        msgs = run_agent_loop(
+            self.model, self.system_prompt, user_input, self._tools(),
+            self.emit, abort=self.abort, max_turns=self.max_turns, history=self.history,
         )
-        for step in range(self.max_steps):
-            raw = self.model.chat(messages)
-            action, action_input = _parse_react(raw)
-
-            if action == "finish":
-                self.emit(action_input)
-                self.last_result = action_input
-                self.history.append({"role": "user", "content": user_input})
-                self.history.append({"role": "assistant", "content": raw})
-                return  # 不返回值 —— emit 已打印, 避免 IPython 的 Out[] 再显示一遍(显示靠 hooks, 原则9)
-
-            # 行动前过 guard hook(默认放行 = 输入即授权)
-            if not self.hooks["guard"](action, action_input):
-                obs = "[BLOCKED by guardrail]"
-            elif action == "python":
-                status, detail = self.execute(action_input)
-                obs = f"[python {status}] {detail}".strip()
-            elif action in self.tools:
-                try:
-                    obs = f"[{action}] {self.tools[action](action_input)}"
-                except Exception as e:
-                    obs = f"[{action} error] {e}"
-            else:
-                obs = f"[unknown action: {action}]"
-
-            self.emit(f"→ {action}: {action_input[:120]}", source=self.name)
-            messages.append({"role": "assistant", "content": raw})
-            messages.append({"role": "user", "content": f"Observation: {obs}"})
-
-        self.last_result = "[max steps reached]"
-        self.emit(self.last_result, source="system")
+        # 取最后一条 assistant 文本作 last_result
+        for m in reversed(msgs):
+            if m.get("role") == "assistant" and m.get("content"):
+                self.last_result = m["content"]
+                break
+        # 累积历史(去掉 system, 供下一轮多轮对话)
+        self.history = [m for m in msgs if m.get("role") != "system"]
 
     def chat(self, message: str) -> None:
-        """对话入口(run 的语义化别名)。返回 None, 显示靠 emit, 结果在 self.last_result。"""
-        return self.run(message)
+        """对话入口(run 的别名, @ 路由用)。"""
+        self.run(message)
+
+    def stop(self) -> None:
+        """请求中止当前 run(异步, run 在别的线程时有效)。"""
+        self.abort.set()
