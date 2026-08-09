@@ -42,20 +42,34 @@ class PrismApp(App):
         app = self
 
         # emit 桥接: actor 线程 emit → call_from_thread 写 RichLog(跨线程安全)
+        # 流式分行: 按 LLM 的 \n 分行(RichLog.write 每次=一行), 不每 token 一行
+        line_buf: list[str] = []
+
+        def flush_line() -> None:
+            if line_buf:
+                app.call_from_thread(log.write, "".join(line_buf))
+                line_buf.clear()
+
         def emit(event: dict) -> None:
             t = event.get("type")
             if t == "message_delta":
-                app.call_from_thread(log.write, event.get("text", ""), shrink=False)
+                # 按 \n 分段: 前面的完整行 flush, 最后一段留 buffer 继续累加下一个 delta
+                parts = event.get("text", "").split("\n")
+                for i, part in enumerate(parts):
+                    line_buf.append(part)
+                    if i < len(parts) - 1:
+                        flush_line()
             elif t == "message_end":
-                if event.get("text"):
-                    app.call_from_thread(log.write, "\n")
+                flush_line()                       # message 结束, flush 剩余行
             elif t == "tool_start":
-                app.call_from_thread(log.write, f"\n[dim]→ {event['name']}({event['args']})[/dim]\n")
+                flush_line()                       # 工具前先把文本 flush
+                app.call_from_thread(log.write, f"[dim]→ {event['name']}({event['args']})[/dim]")
             elif t == "tool_end":
                 mark = "✗" if event.get("is_error") else "✓"
-                app.call_from_thread(log.write, f"[dim]  {mark} {str(event.get('result', ''))[:200]}[/dim]\n")
+                app.call_from_thread(log.write, f"[dim]  {mark} {str(event.get('result', ''))[:200]}[/dim]")
             elif t == "error":
-                app.call_from_thread(log.write, f"[red]error: {event.get('error')}[/red]\n")
+                flush_line()
+                app.call_from_thread(log.write, f"[red]error: {event.get('error')}[/red]")
 
         self.agent.hooks["emit"] = emit
         log.write("[bold]prism[/bold] — 全屏 TUI(抄 pi transcript+dock)\n")
