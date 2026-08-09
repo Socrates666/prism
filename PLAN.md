@@ -51,10 +51,12 @@ agent 是 IPython 命名空间里的活对象。"加能力"= REPL 里写代码�
 ### 原则 9 · 显示自举(agent 内部 hooks)
 显示方法是 agent 在运行时创造的。外壳只在 agent 内部提供 hooks(emit/guard 等可替换回调),agent 改 hooks → 创造任何显示方法。
 
-### 原则 10 · 自我修复 = 自我扩建(增量,不覆盖)
-agent 修改自己**只允许增量扩建**(add 新工具/prompt/patch 进注册表),**不允许覆盖**核心代码。这绕开 `reload`-vs-实例 冲突:不 reload 已有模块,只加载新增;已有实例(旧代码)继续跑 + 通过注册表动态查询看见新增。"修 bug"=加 patch(advice),不覆盖原函数。
+### 原则 10 · 默认 agent 实现 immutable + 扩展层隔离
+系统有**绝对不能改的部分:默认 agent 实现**(即抄 prime-agent 的 `agent_loop.py` —— function-calling 循环)。它是 **immutable base**, 所有扩展的地基, 永不被 overwrite。
 
-> 这是安全模型的范式转变:从**访问控制**(只读禁止)换成**增量 + 注册表**(随便 add,不 overwrite 核心)。不靠禁止,靠"只 add"的约束 + 注册表动态查询。
+agent 修改自己**只允许在扩展层增量扩建**(add patch/tool/prompt 进注册表), 扩展层跟核心实现**物理隔离**(`ext/` vs `prism/`)。这绕开 `reload`-vs-实例 冲突:不 reload base, 只加载扩展;已有实例(base 代码)继续跑 + 通过注册表动态查询看见新增。"修 bug"=加 patch(advice), 不覆盖原函数。
+
+> 澄清"核心只读":不是"agent 完全不能改自己", 而是"**默认实现不改 + 扩展层可改**"。agent 通过扩展改变行为, 不碰 base。安全模型 = **immutable base + 增量扩展(隔离)**。
 
 ### 原则 11 · 扩展点 patch 系统(before/after/around)
 agent_loop 的关键决策点设计为 **patchable**——查询 patch 注册表。每个扩展点支持 **before / after / around**:
