@@ -184,6 +184,22 @@ def _consume_pending_providers():
             pending.clear()
 
 
+def _load_local_providers():
+    """加载同目录的 provider 脚本, 触发它们的 _PENDING_PROVIDERS 注册。"""
+    import importlib, sys
+    from pathlib import Path
+    here = Path(__file__).parent
+    for py in sorted(here.glob("*_provider.py")):
+        modname = f"_search_provider_{py.stem}"
+        if modname not in sys.modules:
+            spec = importlib.util.spec_from_file_location(modname, py)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[modname] = mod
+                spec.loader.exec_module(mod)
+
+
 def register(registry):
+    _load_local_providers()
     _consume_pending_providers()
     registry.tool(_search_tool)

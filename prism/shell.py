@@ -1,7 +1,4 @@
-"""prism TUI 套壳 — textual 全屏, 抄 pi 的 transcript + dock 布局。
-
-布局(抄 pi packages/tui/fullscreen.ts):
-  上方 transcript(RichLog 滚动对话区) + 底部 dock(Input 固定输入)
+"""prism TUI 套壳 — textual 全屏, transcript + dock 布局。
 
 @ 路由(原则8)在 Input 处理; agent emit 跨线程到 RichLog(call_from_thread)。
 """
@@ -12,20 +9,12 @@ from textual.widgets import Header, Input, RichLog, Static
 
 
 class Transcript(RichLog):
-    """transcript 显示区。can_focus=False: 点击它不抢 Input 焦点。
-
-    RichLog 默认 can_focus=True —— 鼠标点击 transcript 会把焦点从输入框
-    抢走, 导致键盘输入丢失、:focus 边框消失(用户报"点击后失效")。
-    transcript 是只读显示区, 不需要焦点, 关掉即可。
-    """
+    """transcript 显示区。can_focus=False: 点击不抢 Input 焦点。"""
     can_focus = False
 
 
 class ThemeCtl:
-    """theme 控制器(阶段12): 暴露给 agent namespace, 跨线程切主题。
-
-    治 theme namespace gap(开放问题 #16): agent 能 `theme.set("nord")`。
-    """
+    """theme 控制器: 暴露给 agent namespace, 跨线程切主题。"""
     def __init__(self, app: "PrismApp"):
         self._app = app
 
@@ -33,7 +22,7 @@ class ThemeCtl:
         self._app.call_from_thread(self._apply, name)
 
     def _apply(self, name: str) -> None:
-        self._app.theme = name  # pragma: no cover  (跨线程, call_from_thread 调)
+        self._app.theme = name  # pragma: no cover
 
     def list(self) -> list:
         return sorted(getattr(self._app, "available_themes", {}).keys())
@@ -41,11 +30,54 @@ class ThemeCtl:
 
 CSS = """
 Screen { layout: vertical; }
-#transcript { height: 1fr; border: solid $accent; padding: 0 1; }
-#dock { height: 3; border: solid $primary; }
-#current { height: auto; min-height: 1; padding: 0 1; color: $text; }
-#dock:focus { border: solid $accent; }
+#transcript { 
+    height: 1fr; 
+    border: round $accent 40%;
+    padding: 0 1;
+}
+#dock { 
+    height: 3; 
+    border: round $primary 50%;
+}
+#current { 
+    height: auto; 
+    min-height: 1; 
+    padding: 0 1; 
+    color: $text;
+}
+#dock:focus { 
+    border: round $accent;
+}
 """
+
+
+def _fmt_args(args: dict, max_len: int = 60) -> str:
+    """精简工具参数显示。长文本截断, 只显示 key 的摘要。"""
+    if not args:
+        return ""
+    parts = []
+    for k, v in args.items():
+        s = str(v).replace("\n", " ").strip()
+        if len(s) > max_len:
+            s = s[:max_len] + "..."
+        parts.append(f"{k}={s}")
+    return ", ".join(parts)
+
+
+def _fmt_result(result: str, max_lines: int = 3, max_chars: int = 150) -> str:
+    """精简工具结果。多行只显示前几行。"""
+    if not result:
+        return ""
+    lines = result.strip().split("\n")
+    if len(lines) > max_lines:
+        shown = lines[:max_lines]
+        shown.append(f"  ... ({len(lines) - max_lines} more lines)")
+        text = "\n".join(shown)
+    else:
+        text = "\n".join(lines)
+    if len(text) > max_chars:
+        text = text[:max_chars] + "..."
+    return text
 
 
 class PrismApp(App):
@@ -56,14 +88,14 @@ class PrismApp(App):
 
     def __init__(self) -> None:
         super().__init__()
-        self.agent = None  # 主 agent(on_mount 时建)
-        self.commands = {}  # slash 指令(on_mount 时从 ext/commands/ 加载)
+        self.agent = None
+        self.commands = {}
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield Transcript(id="transcript", wrap=True, markup=True)
         yield Static(id="current")
-        yield Input(id="dock", placeholder="@agent 消息   或   Python 代码")
+        yield Input(id="dock", placeholder="@agent 消息  |  /command  |  Python 代码")
 
     def on_mount(self) -> None:
         from .agent import Agent
@@ -75,9 +107,6 @@ class PrismApp(App):
         current = self.query_one("#current", Static)
         app = self
 
-        # emit 桥接: actor 线程 emit → call_from_thread(跨线程安全)
-        # 流式同行: message_update 累加 current_buf → update current Static(打字效果);
-        #          message_end 把整段写 RichLog(历史) + 清 current(RichLog 每写=新行, 不能同行流式)
         reasoning_buf: list[str] = []
         current_buf: list[str] = []
 
@@ -85,7 +114,6 @@ class PrismApp(App):
             app.call_from_thread(current.update, "".join(current_buf))
 
         def flush_current() -> None:
-            """把流式 current 写入 RichLog(历史) + 清空(error/tool 中断流式时用)。"""
             text = "".join(current_buf)
             if text:
                 app.call_from_thread(log.write, text)
@@ -95,17 +123,18 @@ class PrismApp(App):
         def flush_reasoning() -> None:
             if reasoning_buf:
                 text = "".join(reasoning_buf).replace("[", "\\[")
-                app.call_from_thread(log.write, f"[dim italic]{text}[/dim italic]")
+                app.call_from_thread(
+                    log.write, f"[dim italic]  {text}[/dim italic]")
                 reasoning_buf.clear()
 
         def emit(event: dict) -> None:
             t = event.get("type")
             if t == "message_update":
-                flush_reasoning()                       # 思考结束, 转正式回复
+                flush_reasoning()
                 current_buf.append(event.get("delta", ""))
-                update_current()                       # 流式同行打字
+                update_current()
             elif t == "message_end":
-                text = "".join(current_buf)             # 整段写 RichLog(历史)
+                text = "".join(current_buf)
                 if text:
                     app.call_from_thread(log.write, text)
                 current_buf.clear()
@@ -117,109 +146,126 @@ class PrismApp(App):
                     if i < len(parts) - 1:
                         flush_reasoning()
             elif t == "tool_execution_start":
-                app.call_from_thread(log.write, f"[dim]→ {event['tool_name']}({event['args']})[/dim]")
+                name = event.get("tool_name", "?")
+                args_str = _fmt_args(event.get("args", {}))
+                app.call_from_thread(
+                    log.write, f"[dim cyan]  ▸ {name}[/dim cyan]"
+                    + (f"[dim]({args_str})[/dim]" if args_str else ""))
             elif t == "tool_execution_end":
-                mark = "✗" if event.get("is_error") else "✓"
-                app.call_from_thread(log.write, f"[dim]  {mark} {str(event.get('result', ''))[:200]}[/dim]")
+                mark = "[red]✗[/red]" if event.get("is_error") else "[green]✓[/green]"
+                result = _fmt_result(str(event.get("result", "")))
+                if result:
+                    # 结果另起一行缩进
+                    app.call_from_thread(
+                        log.write, f"  {mark} [dim]{result}[/dim]")
+                else:
+                    app.call_from_thread(log.write, f"  {mark}")
             elif t == "error":
                 flush_current()
-                app.call_from_thread(log.write, f"[red]error: {event.get('error')}[/red]")
+                app.call_from_thread(
+                    log.write, f"[red bold]✗ error:[/red bold] [red]{event.get('error')}[/red]")
             elif t == "patch_error":
                 flush_current()
-                app.call_from_thread(log.write, f"[yellow]⚠ patch {event.get('phase')}/{event.get('point')}: {event.get('error')} (已降级)[/yellow]")
+                app.call_from_thread(
+                    log.write,
+                    f"[yellow]⚠ {event.get('phase')}/{event.get('point')}: {event.get('error')} (已降级)[/yellow]")
 
-        # 加载 ext/(tools/prompts/patches/skills 进 default_registry, 容错) + slash 指令
+        # 加载 ext/ + slash 指令
         from .commands import load_commands
         load_ext("ext", default_registry, emit=emit)
         self.commands = load_commands("ext", emit=emit)
-        # 建 main agent(接 registry → ext/ 的 tool 可用, 如 web_search)
+        # 建 main agent
         memory = FileMemory(".prism/memory")
-        self.agent = Agent("Prism", model=OpenAIModel(), kind="main", registry=default_registry, memory=memory)
+        self.agent = Agent("Prism", model=OpenAIModel(), kind="main",
+                           registry=default_registry, memory=memory)
         sections = default_registry.get_prompt("prism")
         if sections:
-            self.agent.apply_prompt(sections, "Prism", "main")   # ext/prompts/ 注入(原则 12, 配置外部化)
+            self.agent.apply_prompt(sections, "Prism", "main")
         self.agent.hooks["emit"] = emit
-        self.agent.namespace["theme"] = ThemeCtl(self)   # theme 自举口子(阶段12, 治 #16)
-        log.write("[bold]prism[/bold] — 全屏 TUI(抄 pi transcript+dock)\n")
+        self.agent.namespace["theme"] = ThemeCtl(self)
+
+        # 欢迎信息
+        log.write("[bold cyan]╭──────────────────────────────╮[/bold cyan]")
+        log.write("[bold cyan]│[/bold cyan] [bold]Prism[/bold] — Agentic TUI  [dim]v0.1[/dim]  [bold cyan]│[/bold cyan]")
+        log.write("[bold cyan]╰──────────────────────────────╯[/bold cyan]")
         if default_registry.tools():
-            log.write("工具: " + "  ".join(f"[cyan]{t.name}[/]" for t in default_registry.tools()) + "\n")
+            log.write("[dim]tools:[/dim] " + "  ".join(f"[cyan]{t.name}[/]" for t in default_registry.tools()))
         if self.commands:
-            log.write("指令: " + "  ".join(f"[cyan]/{n}[/]" for n in sorted(self.commands)) + "\n")
-        log.write("输入 [cyan]@agent 消息[/] 对话, 或直接 Python 代码。Ctrl+C 退出。\n\n")
+            log.write("[dim]cmds:[/dim]   " + "  ".join(f"[cyan]/{n}[/]" for n in sorted(self.commands)))
+        log.write("[dim]─[/dim]" * 40)
+        log.write("")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value
         if not text.strip():
             return
         log = self.query_one("#transcript", RichLog)
-        log.write(f"[bold green]>>>[/] {text}\n")
+        # 用户输入用醒目的标记
+        log.write(f"[bold green]❯[/] {text}")
         event.input.value = ""
 
         ns = self.agent.namespace
         stripped = text.strip()
 
-        # / 指令: 第一公民内置(/revert /backups)优先, 再 ext/commands/
+        # / 指令
         if stripped.startswith("/") and "\n" not in stripped:
             parts = stripped[1:].split(None, 1)
             name = parts[0] if parts else ""
             args = parts[1] if len(parts) > 1 else ""
-            builtin = self._builtin_command(name)            # 第一公民(base, 不可被 ext 覆盖)
+            builtin = self._builtin_command(name)
             if builtin is not None:
-                log.write(f"[bold cyan]/{name}[/] {args}\n".rstrip() + "\n")
                 try:
                     result = builtin(args)
                     if result:
-                        log.write(f"{result}\n")
+                        log.write(f"{result}")
                 except Exception as e:  # pragma: no cover
-                    log.write(f"[red]/{name} 失败: {type(e).__name__}: {e}[/]\n")
+                    log.write(f"[red]/{name}: {type(e).__name__}: {e}[/]")
                 return
             cmd = self.commands.get(name)
             if cmd is None:
-                avail = ['/revert', '/backups'] + ['/'+c for c in sorted(self.commands)]
-                log.write(f"[red]/{name}: 未知指令。可用: {' '.join(avail)}[/]\n")
+                avail = ['/revert', '/backups'] + ['/' + c for c in sorted(self.commands)]
+                log.write(f"[red]/{name} — 未知指令。可用: {' '.join(avail)}[/]")
             else:
                 try:
                     ctx = {"agent": self.agent, "app": self, "write": lambda m: log.write(m),
                            "commands": self.commands}
                     result = cmd.run(args, ctx)
                     if result:
-                        log.write(f"{result}\n")
-                except Exception as e:  # pragma: no cover  (pilot 漏)
-                    log.write(f"[red]/{name} 失败: {type(e).__name__}: {e}[/]\n")
+                        log.write(f"{result}")
+                except Exception as e:  # pragma: no cover
+                    log.write(f"[red]/{name}: {type(e).__name__}: {e}[/]")
             return
 
-        # @ 路由(原则8): 单行 @name 消息 → 目标 agent.inject; 否则 Python exec
+        # @ 路由
         if stripped.startswith("@") and "\n" not in stripped:
             parts = stripped[1:].split(None, 1)
             if len(parts) < 2:
-                log.write("[red]空消息。@ 了就得说事[/]\n")
+                log.write("[red]@ 了就得说事[/]")
                 return
             name, msg = parts
             target = ns.get(name)
             if target is not None and hasattr(target, "inject"):
-                target.inject({"type": "run", "input": msg})   # actor 线程跑, 不冻 TUI
+                target.inject({"type": "run", "input": msg})
             else:
-                log.write(f"[red]@{name}: 命名空间没有这个 agent[/]\n")
+                log.write(f"[red]@{name}: 命名空间没有这个 agent[/]")
         else:
-            # 主 agent 享完整 IPython(原则13): exec in namespace
-            # textual 全屏接管终端, exec 的 print 走 sys.stdout 会丢 → 重定向捕获写到 transcript
             import contextlib, io
             buf = io.StringIO()
             try:
                 with contextlib.redirect_stdout(buf):
-                    exec(compile(text, "<prism>", "exec"), ns)  # pragma: no cover  (pilot exec 漏)
+                    exec(compile(text, "<prism>", "exec"), ns)  # pragma: no cover
             except Exception as e:
                 log.write(f"[red]{type(e).__name__}: {e}[/]")
             for line in buf.getvalue().splitlines():
-                log.write(line)  # pragma: no cover  (pilot exec print 漏)
+                log.write(line)  # pragma: no cover
 
     def _builtin_command(self, name: str):
-        """第一公民内置指令(base, 不在 ext/commands/, 不可被 ext 覆盖)。阶段14。"""
+        """第一公民内置指令。"""
         from .guard import revert_latest, list_backups
         if name == "revert":
             def _r(args):
                 n = revert_latest(self.agent.emit)
-                return f"✓ 已回退 {n}(重启生效)" if n else "无改动可回退"
+                return f"[green]✓[/] 已回退 {n}(重启生效)" if n else "无改动可回退"
             return _r
         if name == "backups":
             def _b(args):
@@ -232,14 +278,19 @@ class PrismApp(App):
         return None
 
     def make_subagent_emit(self, name: str):
-        """给子 agent 的 emit(阶段12): 事件汇入主 transcript, 带 [name] 前缀。"""
+        """给子 agent 的 emit: 事件汇入主 transcript, 带标签前缀。"""
         log = self.query_one("#transcript", RichLog)
         app = self
         buf: list[str] = []
 
         def flush() -> None:
             if buf:
-                app.call_from_thread(log.write, f"[dim][{name}][/dim] " + "".join(buf))
+                app.call_from_thread(
+                    log.write, f"[dim blue]┌[{name}][/dim blue]")
+                app.call_from_thread(
+                    log.write, "".join(buf))
+                app.call_from_thread(
+                    log.write, f"[dim blue]└[/dim blue]")
                 buf.clear()
 
         def emit(event: dict) -> None:
@@ -250,13 +301,21 @@ class PrismApp(App):
                 flush()
             elif t == "tool_execution_start":
                 flush()
-                app.call_from_thread(log.write, f"[dim][{name}] → {event.get('tool_name')}[/]")
+                tool = event.get("tool_name", "?")
+                args_str = _fmt_args(event.get("args", {}))
+                app.call_from_thread(
+                    log.write,
+                    f"[dim blue]│[{name}][/dim blue] [dim cyan]▸ {tool}[/dim cyan]"
+                    + (f"[dim]({args_str})[/dim]" if args_str else ""))
             elif t == "tool_execution_end":
-                mark = "✗" if event.get("is_error") else "✓"
-                app.call_from_thread(log.write, f"[dim][{name}]   {mark} {str(event.get('result', ''))[:150]}[/]")
+                mark = "[red]✗[/red]" if event.get("is_error") else "[green]✓[/green]"
+                result = _fmt_result(str(event.get("result", "")))
+                app.call_from_thread(
+                    log.write, f"[dim blue]│[{name}][/dim blue] {mark} [dim]{result}[/dim]")
             elif t == "error":
                 flush()
-                app.call_from_thread(log.write, f"[red][{name}] error: {event.get('error')}[/]")
+                app.call_from_thread(
+                    log.write, f"[dim blue]│[{name}][/dim blue] [red]error: {event.get('error')}[/red]")
         return emit
 
 

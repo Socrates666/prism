@@ -12,3 +12,6 @@ dist/
 
 # 子 agent 工作区(运行时数据)
 workspaces/
+
+# backups
+.prism/backups/

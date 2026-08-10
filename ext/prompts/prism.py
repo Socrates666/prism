@@ -30,7 +30,12 @@ SECTIONS = {
             "- `inject(msg)`: 给子 agent 递条子(异步)\n"
             "- `b.messages`/`b.last_result`: 读子 agent 状态(eventual)\n\n"
             "### ext/ 可变区\n"
-            "- ext/tools/ ext/skills/ ext/commands/ ext/prompts/: 热插拔, 容错降级"
+            "- ext/tools/ ext/skills/ ext/commands/ ext/prompts/: 热插拔, 容错降级\n\n"
+            "### Skill 系统\n"
+            "- `/skill <name>`: 加载 skill 注入 system prompt\n"
+            "- `/skill list`: 列出所有可用 skill\n"
+            "- `/skill-create <name>`: 创建新 skill\n"
+            "- 加载 skill-creator skill 后, 你能自主创建新 skill 扩展能力"
         ),
         "instructions": (
             "### 工作流\n"

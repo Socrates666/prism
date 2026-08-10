@@ -1,11 +1,34 @@
 # ext/skills
 
-`/skill <name>` 读这里的 `<name>.md`，append 到 agent 的 system prompt。
-
-放一个 `.md` 文件（如 `code-review.md`），内容就是 skill 指令。例：
+每个 skill 是一个目录, 包含 `SKILL.md`:
 
 ```
-/skill code-review
+skills/
+├── werden/
+│   └── SKILL.md
+├── code-review/
+│   └── SKILL.md
+└── ...
 ```
 
-→ `ext/skills/code-review.md` 的内容注入 main agent system prompt。
+`/skill <name>` 读 `skills/<name>/SKILL.md`, 注入 main agent system prompt。
+`/skill list` 列出所有可用 skill。
+`/skill-create <name>` 创建新 skill 骨架。
+
+## SKILL.md 格式
+
+```markdown
+---
+name: skill-name
+description: "触发条件和用途描述"
+version: 1.0.0
+---
+
+# Skill Name
+
+## 何时使用
+...
+
+## 执行步骤
+...
+```

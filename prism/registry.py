@@ -69,10 +69,18 @@ def load_ext(ext_dir, registry: Registry,
         kdir = ext_dir / kind
         if not kdir.is_dir():
             continue
+        # 收集 .py: 兼容旧格式 ext/kind/foo.py + 新格式 ext/kind/foo/tool.py
+        py_files = []
         for py in sorted(kdir.glob("*.py")):
-            if py.name.startswith("_"):
-                continue
-            modname = f"prism_ext_{kind}_{py.stem}"
+            if not py.name.startswith("_"):
+                py_files.append((py.stem, py))
+        for tool_dir in sorted(kdir.iterdir()):
+            if tool_dir.is_dir() and not tool_dir.name.startswith("_"):
+                tool_py = tool_dir / "tool.py"
+                if tool_py.exists():
+                    py_files.append((tool_dir.name, tool_py))
+        for stem, py in py_files:
+            modname = f"prism_ext_{kind}_{stem}"
             try:
                 spec = importlib.util.spec_from_file_location(modname, py)
                 if spec is None or spec.loader is None:
@@ -86,7 +94,7 @@ def load_ext(ext_dir, registry: Registry,
                           "error": "缺 register(registry) 入口"})
                     continue
                 register(registry)
-                loaded.append(f"{kind}/{py.stem}")
+                loaded.append(f"{kind}/{stem}")
             except Exception as e:
                 emit({"type": "ext_error", "file": str(py),
                       "error": f"{type(e).__name__}: {e}"})
