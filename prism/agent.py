@@ -99,7 +99,8 @@ class Agent:
         self.namespace = namespace if namespace is not None else _user_ns()
         self.namespace.setdefault(name, self)   # agent 注册进命名空间, 能被自己/别的对象操作
         import os
-        self.max_turns = max_turns if max_turns is not None else int(os.getenv("PRISM_MAX_TURNS", "1000"))
+        _mt = os.getenv("PRISM_MAX_TURNS")
+        self.max_turns = max_turns if max_turns is not None else (int(_mt) if _mt else None)  # None=无限(信任LLM自停)
         self.last_result: str = ""            # prism 增量便利(pi 无, 从 messages 提取最后 assistant)
         self.memory = memory if memory is not None else NullMemory()
         self.messages: list[dict] = list(self.memory.load(name))   # 启动恢复(原则6 跨会话)

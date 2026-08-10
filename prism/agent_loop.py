@@ -80,7 +80,9 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
         patches.run_after("emit", ctx_e)
 
     _emit({"type": "agent_start"})
-    for _turn in range(max_turns):
+    _turn = 0
+    while max_turns is None or _turn < max_turns:
+        _turn += 1
         if abort.is_set():
             break  # pragma: no cover  (精确时序触发)
         if steer_check and steer_check():

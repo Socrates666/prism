@@ -90,8 +90,11 @@ def test_cmd_help_lists_commands():
 def test_cmd_maxturns_set_and_view():
     a = _agent()
     cmds = load_commands("ext")
-    assert "当前" in cmds["maxturns"].run("", _ctx(a))   # 查看
-    r = cmds["maxturns"].run("50", _ctx(a))             # 设置
+    assert "当前" in cmds["maxturns"].run("", _ctx(a))   # 查看(默认 None)
+    r = cmds["maxturns"].run("50", _ctx(a))             # 设上限
     assert "50" in r and a.max_turns == 50
-    assert "须" in cmds["maxturns"].run("0", _ctx(a))    # 无效
+    r2 = cmds["maxturns"].run("none", _ctx(a))          # 无限
+    assert "无上限" in r2 and a.max_turns is None
+    assert "无上限" in cmds["maxturns"].run("0", _ctx(a))    # 0 = 无限
+    assert "须" in cmds["maxturns"].run("-1", _ctx(a))     # 负数无效
     assert "无效" in cmds["maxturns"].run("x", _ctx(a))  # 非数字
