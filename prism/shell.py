@@ -189,15 +189,24 @@ class PrismApp(App):
         from .commands import load_commands
         load_ext("ext", default_registry, emit=emit)
         self.commands = load_commands("ext", emit=emit)
-        # 建 main agent
-        memory = FileMemory(".prism/memory")
-        self.agent = Agent("Prism", model=OpenAIModel(), kind="main",
-                           registry=default_registry, memory=memory)
-        sections = default_registry.get_prompt("prism")
-        if sections:
-            self.agent.apply_prompt(sections, "Prism", "main")
-        self.agent.hooks["emit"] = emit
+        # 从 ext/agents/ 恢复 agent 配置
+        from .agent_registry import restore_agents
+        main_agent, subs = restore_agents(self, emit)
+        if main_agent:
+            self.agent = main_agent
+        else:
+            # fallback: 无配置文件时硬编码创建
+            from .memory import FileMemory as _FM
+            self.agent = Agent("Prism", model=OpenAIModel(), kind="main",
+                               registry=default_registry, memory=_FM(".prism/memory"))
+            sections = default_registry.get_prompt("prism")
+            if sections:
+                self.agent.apply_prompt(sections, "Prism", "main")
+            self.agent.hooks["emit"] = emit
         self.agent.namespace["theme"] = ThemeCtl(self)
+        # 子 agent 注册到命名空间
+        for sub in subs:
+            self.agent.namespace[sub.name] = sub
 
         # 欢迎信息
         log.write("[bold cyan]╭──────────────────────────────╮[/bold cyan]")
