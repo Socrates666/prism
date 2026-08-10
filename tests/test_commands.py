@@ -85,3 +85,13 @@ def test_cmd_help_lists_commands():
     cmds = load_commands("ext")
     r = cmds["help"].run("", _ctx(_agent(), commands=cmds))
     assert "/model" in r and "/thinking" in r
+
+
+def test_cmd_maxturns_set_and_view():
+    a = _agent()
+    cmds = load_commands("ext")
+    assert "当前" in cmds["maxturns"].run("", _ctx(a))   # 查看
+    r = cmds["maxturns"].run("50", _ctx(a))             # 设置
+    assert "50" in r and a.max_turns == 50
+    assert "须" in cmds["maxturns"].run("0", _ctx(a))    # 无效
+    assert "无效" in cmds["maxturns"].run("x", _ctx(a))  # 非数字
