@@ -18,7 +18,8 @@ def test_load_ext_loads_tools_and_prompts():
     r = Registry()
     loaded = load_ext("ext", r)
     assert any(l.startswith("tools/") for l in loaded)      # 有 tool
-    assert "prompts/prism" in loaded                         # prism 人格插件
+    # prompts/ 已合并到 agents/ — 不再单独加载
+    assert "tools/search" in loaded                           # search 工具
     assert len(r.tools()) >= 1
 
 
@@ -40,9 +41,11 @@ def test_search_tool_registered():
     assert len(search_tools) >= 1                            # 至少一个搜索 tool
 
 
-def test_prism_persona_loaded():
-    """ext/prompts/prism 人格插件加载到 registry。"""
-    r = Registry()
-    load_ext("ext", r)
-    sections = r.get_prompt("prism")
-    assert sections is not None and "main" in sections
+def test_prism_agent_config_loaded():
+    """ext/agents/prism/ 配置(含 prompt 段)正确加载。"""
+    from prism.agent_registry import load_agent_configs
+    configs = load_agent_configs()
+    prism_cfg = next((c for c in configs if c["name"] == "Prism"), None)
+    assert prism_cfg is not None
+    assert prism_cfg.get("prompt_sections") is not None
+    assert "role" in prism_cfg["prompt_sections"]

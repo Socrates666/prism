@@ -1,0 +1,11 @@
+name: coder
+kind: sub
+max_turns: 20
+tools:
+- read
+- write
+- ls
+- read_file
+- edit_file
+- write_file
+- list_dir

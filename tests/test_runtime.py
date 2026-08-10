@@ -52,6 +52,8 @@ def test_spawn_command_creates_subagent(monkeypatch):
 
     class FakeSub:
         kind = "sub"
+        name = "bob"
+        prompt = type('P', (), {'add_extra': lambda *a: None})()
         def apply_prompt(self, sections, name=None, kind="main"): pass
 
     def fake_spawn(name, model, *, emit=None, parent=None, **kw):

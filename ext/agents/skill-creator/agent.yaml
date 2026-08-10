@@ -1,0 +1,12 @@
+name: skill-creator
+kind: sub
+max_turns: 20
+tools:
+- read
+- write
+- ls
+- list_skills
+- write_skill
+- read_skill
+skills:
+- skill-creator

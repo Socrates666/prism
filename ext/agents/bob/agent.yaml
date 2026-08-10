@@ -1,0 +1,6 @@
+name: bob
+kind: sub
+tools:
+- read
+- write
+- ls

@@ -69,15 +69,17 @@ def test_append_to_system_prompt_runtime():
 
 
 def test_apply_prompt_fills_sections():
-    """配置外部化(原则 12): ext/prompts/ 人格插件注入 prompt 段(四类之一)。"""
-    from prism.registry import Registry, load_ext
-    r = Registry()
-    load_ext("ext", r)
-    sections = r.get_prompt("prism")
+    """配置外部化(原则 12): ext/agents/ YAML 声明 prompt 段。"""
+    from prism.agent_registry import load_agent_configs
+    configs = load_agent_configs()
+    prism_cfg = next((c for c in configs if c["name"] == "Prism"), None)
+    assert prism_cfg is not None
+    sections = prism_cfg.get("prompt_sections")
     assert sections is not None
     a = Agent("Prism", model=FakeModel([]))
     assert a.system_prompt == ""                       # base 不硬编码(空)
-    a.apply_prompt(sections, "Prism", "main")
+    from prism.agent_registry import _apply_prompt_from_config
+    _apply_prompt_from_config(a, prism_cfg)
     assert "Prism" in a.system_prompt and "## 角色" in a.system_prompt
     assert "python" in a.system_prompt            # capabilities
     assert "RLM" in a.system_prompt               # instructions(RLM 理念)

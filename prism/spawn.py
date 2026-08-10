@@ -152,7 +152,7 @@ def make_project_tools(agent_name: str, project_root: str = ".") -> list[Tool]:
 
 
 def spawn(name: str, model, *, file_tools: bool = True, project_tools: bool = False,
-          tools: list[Tool] | None = None,
+          tool_names: list[str] | None = None, tools: list[Tool] | None = None,
           emit: Callable[[dict], None] | None = None, workspaces_root: str = "workspaces",
           parent=None):
     """生产一个子 agent(原则 13/14)。
@@ -168,12 +168,27 @@ def spawn(name: str, model, *, file_tools: bool = True, project_tools: bool = Fa
         raise ValueError(f"'{name}' 工作区已存在(子 agent workspace 不重复)")
     ws.mkdir(parents=True)
 
+    # 构建工具池
+    ws_tools = {t.name: t for t in make_file_tools(ws)}
+    proj_tools = {t.name: t for t in make_project_tools(name)}
+    all_pool = {}
+    all_pool.update(ws_tools)
+    all_pool.update(proj_tools)
+
     granted: list[Tool] = []
-    if file_tools:
-        granted += make_file_tools(ws)
-    if project_tools:
-        granted += make_project_tools(name)
-    granted += list(tools or [])
+    if tool_names:
+        # 声明式: 按 tools 列表选
+        for tn in tool_names:
+            if tn in all_pool:
+                granted.append(all_pool[tn])
+            # else: 可能是 registry 注入的(如 search), skip — Agent.__init__ 会从 registry 加
+    else:
+        # 布尔兼容: 旧接口
+        if file_tools:
+            granted += make_file_tools(ws)
+        if project_tools:
+            granted += make_project_tools(name)
+    granted += list(tools or [])  # 额外手工赋予
 
     from .agent import Agent
     agent = Agent(name, model, kind="sub", tools=granted, actor=True)
