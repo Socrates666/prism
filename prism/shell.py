@@ -90,12 +90,21 @@ class PrismApp(App):
         super().__init__()
         self.agent = None
         self.commands = {}
+        self._agent_busy = False  # agent 正在跑时设 True
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield Transcript(id="transcript", wrap=True, markup=True)
         yield Static(id="current")
         yield Input(id="dock", placeholder="@agent 消息  |  /command  |  Python 代码")
+
+    def on_key(self, event) -> None:
+        """Esc 中断当前 agent run(不退出 prism)。"""
+        if event.key == "escape" and self._agent_busy:
+            if self.agent:
+                self.agent.stop()
+                log = self.query_one("#transcript", RichLog)
+                log.write("[yellow]⏹ 已中断[/yellow]")
 
     def on_mount(self) -> None:
         from .agent import Agent
@@ -129,6 +138,12 @@ class PrismApp(App):
 
         def emit(event: dict) -> None:
             t = event.get("type")
+            if t == "agent_start":
+                app._agent_busy = True
+            elif t == "agent_end":
+                app._agent_busy = False
+            elif t == "steer_interrupt":
+                app._agent_busy = False
             if t == "message_update":
                 flush_reasoning()
                 current_buf.append(event.get("delta", ""))
@@ -245,7 +260,11 @@ class PrismApp(App):
             name, msg = parts
             target = ns.get(name)
             if target is not None and hasattr(target, "inject"):
-                target.inject({"type": "run", "input": msg})
+                # 如果目标正在跑, steer 插队; 否则正常 followUp
+                kind = "steer" if getattr(target, "_thread", None) and target.inbox.qsize() > 0 else "followUp"
+                target.inject({"type": "run", "input": msg}, kind=kind)
+                if kind == "steer":
+                    log.write(f"[yellow]⚡ steer → {name}[/yellow]")
             else:
                 log.write(f"[red]@{name}: 命名空间没有这个 agent[/]")
         else:
@@ -295,6 +314,12 @@ class PrismApp(App):
 
         def emit(event: dict) -> None:
             t = event.get("type")
+            if t == "agent_start":
+                app._agent_busy = True
+            elif t == "agent_end":
+                app._agent_busy = False
+            elif t == "steer_interrupt":
+                app._agent_busy = False
             if t == "message_update":
                 buf.append(event.get("delta", ""))
             elif t == "message_end":

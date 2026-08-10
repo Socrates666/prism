@@ -221,6 +221,18 @@ class Agent:
         """运行时加 tool(增量扩建正道)。"""
         self._extra_tools.append(tool)
 
+    def _check_steer(self) -> bool:
+        """检查 inbox 是否有 steer(插队)消息。不取出, 只报告存在性。"""
+        import queue as _q
+        try:
+            # peek: priority 0 = steer, 如果队列非空且队头 priority=0 就是 steer
+            # PriorityQueue 不支持 peek, 用非阻塞 get + put 回去
+            priority, seq, msg = self.inbox.get_nowait()
+            self.inbox.put((priority, seq, msg))  # 放回
+            return priority == 0  # steer = priority 0
+        except _q.Empty:
+            return False
+
     def run(self, user_input: str) -> None:
         """同步 function-calling loop(前台)。返回 None, 显示靠 emit, 结果在 last_result。"""
         self.abort.clear()
@@ -229,6 +241,7 @@ class Agent:
             self.model, self.system_prompt, user_input, self._tools(),
             self.emit, abort=self.abort, max_turns=self.max_turns,
             history=self.messages, patches=self.patches, max_retries=self.max_retries,
+            steer_check=self._check_steer,
         )
         for m in reversed(msgs):
             if m.get("role") == "assistant" and m.get("content"):

@@ -52,7 +52,8 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
                    emit: EventSink, *, abort: threading.Event | None = None,
                    max_turns: int = 1000, history: list[dict] | None = None,
                    patches: PatchRegistry | None = None,
-                   max_retries: int = 0) -> list[dict]:
+                   max_retries: int = 0,
+                   steer_check: Callable[[], bool] | None = None) -> list[dict]:
     """function-calling agent loop。返回本次累积的 messages(含 system)。
 
     patches=None 时建一个空 PatchRegistry(no-op), 行为与无 patch 完全一致。
@@ -82,6 +83,9 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
     for _turn in range(max_turns):
         if abort.is_set():
             break  # pragma: no cover  (精确时序触发)
+        if steer_check and steer_check():
+            _emit({"type": "steer_interrupt"})
+            break  # steer 插队: 中断当前 run, actor 线程处理 inbox
         _emit({"type": "turn_start"})
 
         # ── stream_response 点(before/after) + retry(对齐 pi auto_retry) ──
