@@ -50,7 +50,7 @@ def _to_schema(tool: Tool) -> dict:
 
 def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool],
                    emit: EventSink, *, abort: threading.Event | None = None,
-                   max_turns: int = 20, history: list[dict] | None = None,
+                   max_turns: int = 1000, history: list[dict] | None = None,
                    patches: PatchRegistry | None = None,
                    max_retries: int = 0) -> list[dict]:
     """function-calling agent loop。返回本次累积的 messages(含 system)。

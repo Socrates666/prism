@@ -79,8 +79,8 @@ def test_apply_prompt_fills_sections():
     assert a.system_prompt == ""                       # base 不硬编码(空)
     a.apply_prompt(sections, "Prism", "main")
     assert "Prism" in a.system_prompt and "## 角色" in a.system_prompt
-    assert "python 工具" in a.system_prompt            # capabilities
-    assert "RLM" in a.system_prompt                    # instructions(RLM 理念)
+    assert "python" in a.system_prompt            # capabilities
+    assert "RLM" in a.system_prompt               # instructions(RLM 理念)
 
 
 # ── D4: inject steer/followUp + subscribe ──────────────

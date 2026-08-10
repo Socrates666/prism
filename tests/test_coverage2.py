@@ -307,6 +307,44 @@ def test_tui_python_exec_error_shown():
     asyncio.run(run())
 
 
+def test_tui_revert_and_backups_builtin():              # 第一公民 /revert /backups
+    from prism.shell import PrismApp
+    from textual.widgets import Input
+
+    async def run():
+        async with PrismApp().run_test() as pilot:
+            app = pilot.app
+            app.call_from_thread = lambda *a, **k: None
+            dock = app.query_one("#dock", Input)
+            for cmd in ["/revert", "/backups"]:
+                dock.value = cmd
+                await pilot.press("enter")
+                await pilot.pause()
+            assert app.is_running
+    asyncio.run(run())
+
+
+def test_tui_backups_with_changes():                     # /backups 有备份时列
+    from prism.shell import PrismApp
+    from textual.widgets import Input
+    import prism.guard as g
+    from pathlib import Path
+
+    async def run():
+        async with PrismApp().run_test() as pilot:
+            g._backups.clear()
+            g._backups.append((Path("a.py"), Path("a.bak")))
+            app = pilot.app
+            app.call_from_thread = lambda *a, **k: None
+            dock = app.query_one("#dock", Input)
+            dock.value = "/backups"
+            await pilot.press("enter")
+            await pilot.pause()
+            g._backups.clear()
+            assert app.is_running
+    asyncio.run(run())
+
+
 def test_load_commands_skips_underscore(tmp_path):
     from prism.commands import load_commands
     (tmp_path / "commands").mkdir()

@@ -193,9 +193,16 @@ class Agent:
                 exec(compile(code, f"<{self.name}>", "exec"), glb)
             glb.pop("__builtins__", None)
             self.namespace.update(glb)   # 同步新建变量回共享 namespace
-            return ("ok", buf.getvalue())
+            out = buf.getvalue()
         except Exception as e:
             return ("error", f"{type(e).__name__}: {e}")
+        # 改了 prism/ ? verify_and_revert(阶段14: reload 失败自动回退)
+        from .guard import changed_files, verify_and_revert
+        if changed_files():
+            if not verify_and_revert(self.emit):
+                return ("error", "改动导致模块 reload 失败, 已自动回退到备份(重启生效)")
+            return ("ok", (out + "\n[已改 prism/ 实现, reload 验证通过, 重启完全生效]").strip())
+        return ("ok", out)
 
     def _tools(self) -> list[Tool]:
         # 原则13: 主 agent 有 python 工具(完整IPython); 子 agent 只有工厂赋予的(_extra_tools)

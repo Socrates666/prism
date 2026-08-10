@@ -1,6 +1,3 @@
-PATH: .\ext\prompts\prism.py
-LENGTH: 2526
-
 """默认 prompt 人格插件(ext/prompts/, 原则 12 可变区)。
 
 agent 的配置(system prompt 段)由 ext/prompts/ 管理, 不硬编码在 Agent base(原则 10)。

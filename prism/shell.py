@@ -158,14 +158,25 @@ class PrismApp(App):
         ns = self.agent.namespace
         stripped = text.strip()
 
-        # / 指令(ext/commands/, 扩展点)
+        # / 指令: 第一公民内置(/revert /backups)优先, 再 ext/commands/
         if stripped.startswith("/") and "\n" not in stripped:
             parts = stripped[1:].split(None, 1)
             name = parts[0] if parts else ""
             args = parts[1] if len(parts) > 1 else ""
+            builtin = self._builtin_command(name)            # 第一公民(base, 不可被 ext 覆盖)
+            if builtin is not None:
+                log.write(f"[bold cyan]/{name}[/] {args}\n".rstrip() + "\n")
+                try:
+                    result = builtin(args)
+                    if result:
+                        log.write(f"{result}\n")
+                except Exception as e:  # pragma: no cover
+                    log.write(f"[red]/{name} 失败: {type(e).__name__}: {e}[/]\n")
+                return
             cmd = self.commands.get(name)
             if cmd is None:
-                log.write(f"[red]/{name}: 未知指令。可用: {' '.join('/'+c for c in sorted(self.commands))}[/]\n")
+                avail = ['/revert', '/backups'] + ['/'+c for c in sorted(self.commands)]
+                log.write(f"[red]/{name}: 未知指令。可用: {' '.join(avail)}[/]\n")
             else:
                 try:
                     ctx = {"agent": self.agent, "app": self, "write": lambda m: log.write(m),
@@ -201,6 +212,24 @@ class PrismApp(App):
                 log.write(f"[red]{type(e).__name__}: {e}[/]")
             for line in buf.getvalue().splitlines():
                 log.write(line)  # pragma: no cover  (pilot exec print 漏)
+
+    def _builtin_command(self, name: str):
+        """第一公民内置指令(base, 不在 ext/commands/, 不可被 ext 覆盖)。阶段14。"""
+        from .guard import revert_latest, list_backups
+        if name == "revert":
+            def _r(args):
+                n = revert_latest(self.agent.emit)
+                return f"✓ 已回退 {n}(重启生效)" if n else "无改动可回退"
+            return _r
+        if name == "backups":
+            def _b(args):
+                bf = list_backups()
+                if not bf:
+                    return "无备份"
+                return "改动备份栈(最近在上):\n" + "\n".join(
+                    f"  {i+1}. {o} → {b}" for i, (o, b) in enumerate(bf))
+            return _b
+        return None
 
     def make_subagent_emit(self, name: str):
         """给子 agent 的 emit(阶段12): 事件汇入主 transcript, 带 [name] 前缀。"""
