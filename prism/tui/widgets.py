@@ -358,7 +358,7 @@ class Input(Widget):
 
     # ── 绘制 ─────────────────────────────────────────────────────────────
     def draw(self, buf, x, y, w, h) -> None:
-        border = self.app.style("accent") if self._focused else self.app.style("border_muted")
+        border = self.app.style("editor_border") if self._focused else self.app.style("border_muted")
         buf.box(x, y, w, h, border_style=border)
         ix, iw, ih = x + 1, max(1, w - 2), max(1, h - 2)
         lines = self.value.split("\n") if self.value else [""]

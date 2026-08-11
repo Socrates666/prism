@@ -31,7 +31,7 @@ Screen { layout: vertical; }
         yield Header(id="header")
         yield RichLog(id="transcript", wrap=True)
         yield Static(id="current")
-        yield Input(id="dock", placeholder="@agent 消息  |  /command  |  Python 代码")
+        yield Input(id="dock", placeholder="")
         yield Footer(id="footer")
 
     # ── 按键(Esc 中断当前 agent run, 不退出 prism) ────────────────────────

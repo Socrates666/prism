@@ -42,6 +42,7 @@ DARK = {
     "tool_success_bg": _h("283228"), "tool_error_bg": _h("3c2828"),
     "thinking_bg": _h("282832"), "cognitive_bg": _h("2d2838"),
     "page_bg": _h("18181e"),
+    "editor_border": Style(fg=_h("ff1493")),   # DeepPink: 输入框边框(亮粉深一点)
 }
 LIGHT = {
     "accent": Style(fg=_h("5a8080")), "primary": Style(fg=_h("547da7")),
@@ -57,6 +58,7 @@ LIGHT = {
     "tool_success_bg": _h("e8f0e8"), "tool_error_bg": _h("f0e8e8"),
     "thinking_bg": _h("e8e8f0"), "cognitive_bg": _h("ede7f6"),
     "page_bg": _h("ffffff"),
+    "editor_border": Style(fg=_h("d63384")),   # 浅色主题用深玫红
 }
 
 
