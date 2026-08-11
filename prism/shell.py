@@ -330,4 +330,12 @@ def _fmt_result(result: str, max_lines: int = 3, max_chars: int = 150) -> str:
 
 
 def main() -> None:
+    import os
+    if os.environ.get("PRISM_SMOKE"):
+        PrismApp().run(headless=True)        # 入口端到端验证: 装配+on_mount, 不进终端
+        return
     PrismApp().run()  # pragma: no cover  (入口)
+
+
+if __name__ == "__main__":
+    main()
