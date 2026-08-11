@@ -32,6 +32,12 @@ def make_reflect_tool(agent) -> Tool:
                 agent.forest.add_edge(nid, BASED_ON, tid)
                 linked.append(tid)
         suffix = f", based_on={linked}" if linked else ", based_on=[]"
+        # 白盒化: 发"反思"认知事件让 TUI 显示
+        try:
+            agent.emit({"type": "cognitive", "stage": "reflect",
+                        "content": content, "based_on": linked})
+        except Exception:
+            pass
         return f"[反思已记] node={nid}{suffix}。这能被再次 reflect(套娃)= 自指递归。"
 
     return Tool(

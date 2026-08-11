@@ -42,4 +42,10 @@ class HeuristicIntuition(IntuitionBackend):
             lines.append("你的反思:")
             for r in reflections:
                 lines.append(f"  ↻ (#{r['id']}) {r['content']}")
-        return [{"role": "system", "content": "\n".join(lines)}]
+        content = "\n".join(lines)
+        # 白盒化: 发"直觉"认知事件让 TUI 显示(思维树白盒的重要组成)
+        try:
+            agent.emit({"type": "cognitive", "stage": "intuition", "content": content})
+        except Exception:
+            pass
+        return [{"role": "system", "content": content}]

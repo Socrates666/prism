@@ -164,17 +164,29 @@ class PrismApp(App):
                 name = event.get("tool_name", "?")
                 args_str = _fmt_args(event.get("args", {}))
                 app.call_from_thread(
-                    log.write, f"[dim cyan]  ▸ {name}[/dim cyan]"
+                    log.write, f"[cyan]行动[/cyan] [dim]▸ {name}[/dim]"
                     + (f"[dim]({args_str})[/dim]" if args_str else ""))
             elif t == "tool_execution_end":
                 mark = "[red]✗[/red]" if event.get("is_error") else "[green]✓[/green]"
                 result = _fmt_result(str(event.get("result", "")))
+                obs = "[red]观察[/red]" if event.get("is_error") else "[green]观察[/green]"
                 if result:
-                    # 结果另起一行缩进
                     app.call_from_thread(
-                        log.write, f"  {mark} [dim]{result}[/dim]")
+                        log.write, f"{obs} {mark} [dim]{result}[/dim]")
                 else:
-                    app.call_from_thread(log.write, f"  {mark}")
+                    app.call_from_thread(log.write, f"{obs} {mark}")
+            elif t == "cognitive":
+                # 白盒化: 认知循环阶段(直觉/反思)显式可见
+                stage = event.get("stage")
+                content = _fmt_result(str(event.get("content", ""))).replace("[", "\\[")
+                if stage == "intuition":
+                    app.call_from_thread(
+                        log.write, f"[magenta]直觉[/magenta] [dim]▸ {content}[/dim]")
+                elif stage == "reflect":
+                    bo = event.get("based_on", [])
+                    bo_str = f" [dim](based_on {bo})[/dim]" if bo else ""
+                    app.call_from_thread(
+                        log.write, f"[yellow]反思[/yellow] [dim italic]↺ {content}[/dim italic]{bo_str}")
             elif t == "error":
                 flush_current()
                 app.call_from_thread(
@@ -339,13 +351,25 @@ class PrismApp(App):
                 args_str = _fmt_args(event.get("args", {}))
                 app.call_from_thread(
                     log.write,
-                    f"[dim blue]│[{name}][/dim blue] [dim cyan]▸ {tool}[/dim cyan]"
+                    f"[dim blue]│[{name}][/dim blue] [cyan]行动[/cyan] [dim]▸ {tool}[/dim]"
                     + (f"[dim]({args_str})[/dim]" if args_str else ""))
             elif t == "tool_execution_end":
                 mark = "[red]✗[/red]" if event.get("is_error") else "[green]✓[/green]"
                 result = _fmt_result(str(event.get("result", "")))
+                obs = "[red]观察[/red]" if event.get("is_error") else "[green]观察[/green]"
                 app.call_from_thread(
-                    log.write, f"[dim blue]│[{name}][/dim blue] {mark} [dim]{result}[/dim]")
+                    log.write, f"[dim blue]│[{name}][/dim blue] {obs} {mark} [dim]{result}[/dim]")
+            elif t == "cognitive":
+                stage = event.get("stage")
+                content = _fmt_result(str(event.get("content", ""))).replace("[", "\\[")
+                if stage == "intuition":
+                    app.call_from_thread(
+                        log.write, f"[dim blue]│[{name}][/dim blue] [magenta]直觉[/magenta] [dim]▸ {content}[/dim]")
+                elif stage == "reflect":
+                    bo = event.get("based_on", [])
+                    bo_str = f" [dim](based_on {bo})[/dim]" if bo else ""
+                    app.call_from_thread(
+                        log.write, f"[dim blue]│[{name}][/dim blue] [yellow]反思[/yellow] [dim italic]↺ {content}[/dim italic]{bo_str}")
             elif t == "error":
                 flush()
                 app.call_from_thread(
