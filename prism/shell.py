@@ -133,7 +133,7 @@ class PrismApp(App):
             if reasoning_buf:
                 text = "".join(reasoning_buf).replace("[", "\\[")
                 app.call_from_thread(
-                    log.write, f"[dim italic]  {text}[/dim italic]")
+                    log.write, f"[blue]思考[/blue] [dim italic]{text}[/dim italic]")
                 reasoning_buf.clear()
 
         def emit(event: dict) -> None:
@@ -216,6 +216,11 @@ class PrismApp(App):
                 self.agent.apply_prompt(sections, "Prism", "main")
             self.agent.hooks["emit"] = emit
         self.agent.namespace["theme"] = ThemeCtl(self)
+        # 认知层(RLM): 主 agent 接 SQLiteForest + 搜索循环(直觉/自指/TUI 白盒五阶段)
+        from .forest import SQLiteForest
+        from .cog_patches import enable_cognitive_cycle
+        self.agent.forest = SQLiteForest(".prism/forest.db", session_id=self.agent.name)
+        enable_cognitive_cycle(self.agent)
         # 子 agent 注册到命名空间
         for sub in subs:
             self.agent.namespace[sub.name] = sub

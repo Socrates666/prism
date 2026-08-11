@@ -146,7 +146,7 @@ def test_retry_gives_up_after_max():
 
 def test_thinking_level_settable():
     a = Agent("a", model=FakeModel([]))
-    assert a.thinking_level == "off"
+    assert a.thinking_level == "medium"   # 默认开思考(model.py: 仅 off 关思考, 其他开)
     a.set_thinking_level("high")
     assert a.thinking_level == "high"
 

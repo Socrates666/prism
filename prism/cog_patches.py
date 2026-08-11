@@ -39,11 +39,16 @@ def enable_cognitive_cycle(agent, *, max_thoughts: int = 5):
     agent.cognitive_hooks.append(AutoAttachHook())
     # 2. 启发式直觉(C 阶段换小模型: agent.intuition = SmallModelIntuition(...))
     agent.intuition = HeuristicIntuition(agent.forest, max_thoughts=max_thoughts)
-    # 3. 直觉 stage: build_messages before —— 注入 search-state
+    # 3. 直觉 stage: build_messages before —— 树接管历史 + 注入 search-state
     def inject_search_state(ctx, _agent=agent):
         extra = _agent.intuition.select_context(_agent, ctx)
-        for m in extra:
-            ctx["messages"].append(m)
+        msgs = ctx["messages"]
+        # 树接管历史: 去除累计的 messages-history(树已持久化是 source of truth),
+        # 重组为 system(含意识 prompt) + search-state + user。within-run 的 assistant/tool
+        # 在本 patch 之后由 loop 追加, 不受影响。
+        system_msgs = [m for m in msgs if m.get("role") == "system"]
+        user_msg = msgs[-1] if (msgs and msgs[-1].get("role") == "user") else None
+        msgs[:] = system_msgs + list(extra) + ([user_msg] if user_msg is not None else [])
     agent.add_patch("build_messages", inject_search_state, kind="before")
     # 4. 认知树自指意识: 告诉 agent 它有 forest + 怎么 raw 自指(开放问题 6 = A 全开配套)
     agent.prompt.add_extra(_cognitive_awareness_prompt(agent.name))

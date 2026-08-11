@@ -82,7 +82,7 @@ class Agent:
                  append_system_prompt: list[str] | None = None,
                  namespace: dict | None = None, tools: list[Tool] | None = None,
                  max_turns: int | None = None, kind: str = "main", actor: bool = True,
-                 registry=None, max_retries: int = 0, thinking_level: str = "off",
+                 registry=None, max_retries: int = 0, thinking_level: str = "medium",
                  memory: MemoryBackend | None = None,
                  forest: Forest | None = None,
                  intuition: IntuitionBackend | None = None,
