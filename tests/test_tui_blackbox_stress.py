@@ -627,3 +627,52 @@ def test_richlog_mixed_entries_sequence():
     out = render_plain(buf)
     for needle in ["start", "u", "tool", "res", "th", "int", "end"]:
         assert needle in out, f"缺失 {needle}"
+
+
+# ── 10. 第四轮: markup 吞字符 + 认知/思考降级(回归) ──────────────────────────
+def test_tool_result_brackets_not_eaten():
+    """工具结果含 [info] 这种 → 必须字面显示, 不能被 markup 当标签吞掉。"""
+    log = _log()
+    ref = log.tool_start("t")
+    log.tool_end(ref, "[error] boom [ok]", False)
+    out = _render_log(log)
+    assert "[error]" in out and "[ok]" in out
+
+
+def test_cognitive_based_on_not_eaten():
+    """based_on 列表 ['x'] 含 [] → 不能被吞。"""
+    log = _log()
+    log.cognitive("reflect", "c", based_on=["node1"])
+    out = _render_log(log)
+    assert "node1" in out
+
+
+def test_cognitive_renders_as_inline_line_not_band():
+    """认知事件降级为 dim inline 行(不再是背景块)。"""
+    log = _log()
+    log.cognitive("intuition", "guess")
+    # entries 里应是 line, 不是 block
+    assert all(kind == "line" for kind, _ in log.entries)
+
+
+def test_thinking_renders_as_inline_line_not_band():
+    log = _log()
+    log.thinking("hmm")
+    assert all(kind == "line" for kind, _ in log.entries)
+
+
+def test_user_and_tool_still_have_bands():
+    """user + tool 仍保留背景块(这俩有意义), 不被一起降级。"""
+    log = _log()
+    log.user("hi")
+    ref = log.tool_start("t")
+    log.tool_end(ref, "r", False)
+    kinds = [kind for kind, _ in log.entries]
+    assert kinds.count("block") == 2   # user + tool
+
+
+def test_user_message_with_bracket_shown():
+    """用户消息含 [ → 字面(注: 当前 user 不转义, 但至少不崩)。"""
+    log = _log()
+    log.user("see [red] text")
+    log._ensure_units(40)   # 不崩

@@ -110,27 +110,27 @@ class RichLog(Widget):
 
     def tool_end(self, ref: dict, result: str, is_error: bool) -> None:
         # pi: 状态只靠背景色传达(绿/红), 工具名保持 bold, 结果追加在下方
+        # 结果是数据(文件内容/命令输出) → 转义 [ 防 markup 吞字符
         ref["bg"] = self._bg("tool_error_bg" if is_error else "tool_success_bg")
         head = f"[bold]{ref.get('name', '?')}[/bold]"
-        ref["body"] = [head] + ([result] if result else [])
+        safe = (result or "").replace("[", "\\[")
+        ref["body"] = [head] + ([safe] if safe else [])
         self._invalidate()
 
     def thinking(self, text: str) -> None:
-        # pi: 思考块, dim italic 文本 + 淡背景, 无标题
-        self.entries.append(("block", {
-            "bg": self._bg("thinking_bg"), "body": [f"[dim italic]{text}[/dim italic]"],
-        }))
-        self._invalidate()
+        # pi: 思考是 subtle/可折叠的内部推理 → dim inline 一行, 不做醒目全宽灰带
+        for sub in (text or "").split("\n"):
+            self.write(f"[dim italic]  {sub}[/dim italic]" if sub else "")
 
     def cognitive(self, stage: str, content: str, based_on=None) -> None:
-        # pi 风格: bold 标签内联 + 内容, 背景色带, 无标题栏
-        label = {"intuition": "◈ intuition", "reflect": "↺ reflect"}.get(stage, stage)
-        body = (f"[bold]{label}[/bold] {content}"
-                + (f"  [dim](based_on {based_on})[/dim]" if based_on else ""))
-        self.entries.append(("block", {
-            "bg": self._bg("cognitive_bg"), "body": [body],
-        }))
-        self._invalidate()
+        # 认知(直觉/反思)是 agent 内部推理 → dim inline 行 + 小色标, 不做醒目灰带
+        label = {"intuition": "◈", "reflect": "↺"}.get(stage, "·")
+        color = "yellow" if stage == "reflect" else "magenta"
+        bo = ""
+        if based_on:
+            safe = str(based_on).replace("[", "\\[")   # 防 [ 被当 markup 标签吞掉
+            bo = f"  [dim](based_on {safe})[/dim]"
+        self.write(f"[{color}]{label}[/{color}] [dim italic]{content}[/dim italic]{bo}")
 
     def _st(self, tok: str) -> Style:
         return self.app.style(tok) if self.app else Style()
