@@ -16,6 +16,8 @@ from typing import Callable
 from .agent_loop import run_agent_loop, Tool
 from .patch import PatchRegistry
 from .memory import MemoryBackend, NullMemory
+from .cognitive import (Forest, CognitiveHook, IntuitionBackend,
+                        NullForest, NULL_HOOK, NullIntuition)
 
 
 def _user_ns() -> dict:
@@ -81,7 +83,10 @@ class Agent:
                  namespace: dict | None = None, tools: list[Tool] | None = None,
                  max_turns: int | None = None, kind: str = "main", actor: bool = True,
                  registry=None, max_retries: int = 0, thinking_level: str = "off",
-                 memory: MemoryBackend | None = None):
+                 memory: MemoryBackend | None = None,
+                 forest: Forest | None = None,
+                 intuition: IntuitionBackend | None = None,
+                 cognitive_hooks: list | None = None):
         self.name = name
         self.model = model
         self.kind = kind                  # "main"(完整IPython, 有python工具) / "sub"(工厂受限, 无裸exec)
@@ -103,6 +108,10 @@ class Agent:
         self.max_turns = max_turns if max_turns is not None else (int(_mt) if _mt else None)  # None=无限(信任LLM自停)
         self.last_result: str = ""            # prism 增量便利(pi 无, 从 messages 提取最后 assistant)
         self.memory = memory if memory is not None else NullMemory()
+        # 认知层(RLM Phase A): 空实现 = 退化为现状(无认知层)
+        self.forest: Forest = forest if forest is not None else NullForest()
+        self.intuition: IntuitionBackend = intuition if intuition is not None else NullIntuition()
+        self.cognitive_hooks: list[CognitiveHook] = list(cognitive_hooks) if cognitive_hooks is not None else []
         self.messages: list[dict] = list(self.memory.load(name))   # 启动恢复(原则6 跨会话)
         self.streaming_message: str | None = None   # 对齐 pi: 当前流式中的文本
         self.streaming_reasoning: str | None = None   # 对齐 pi: 当前思考过程(reasoning_content)
