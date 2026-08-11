@@ -143,15 +143,16 @@ def test_input_renders_at_nonzero_y():
 
 def test_richlog_scroll():
     log = RichLog(id="t"); log.app = _StubApp()
-    for i in range(20):
+    for i in range(40):
         log.write(f"line{i}")
-    log._cache_w = -1
-    rows = log._ensure_rows(40)
-    assert len(rows) == 20
-    log.scroll_up(5)
-    assert log._scroll == 15
+    units = log._ensure_units(80)          # 40 行 → 40 个 line unit
+    assert len(units) == 40
+    assert log._follow is True             # 初始贴底
+    log.scroll_up(5)                       # 40 unit, ih=24 → 贴底起点 16, 减 5 = 11
+    assert log._follow is False
+    assert log._top == 11
     log.scroll_end()
-    assert log._scroll is None                       # 回到贴底
+    assert log._follow is True             # 回到贴底
 
 
 # ── app headless render ─────────────────────────────────────────────────────

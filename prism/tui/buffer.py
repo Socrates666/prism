@@ -4,16 +4,8 @@
 重画该行, 最小化输出、避免闪烁。支持 CJK 全宽字符。
 """
 from __future__ import annotations
-import unicodedata
-from dataclasses import dataclass
-from .markup import Style, parse_markup, wrap_segments
-
-
-def char_width(ch: str) -> int:
-    """单字符显示宽度(1 或 2)。控制字符按 0。"""
-    if not ch or ord(ch) < 32:
-        return 0
-    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+from dataclasses import dataclass, replace
+from .markup import Style, parse_markup, wrap_segments, char_width
 
 
 @dataclass
@@ -130,6 +122,13 @@ class Buffer:
         for ry in range(y, min(y + h, self.rows)):
             for rx in range(x, min(x + w, self.cols)):
                 self.grid[ry][rx] = _blank()
+
+    def fill_bg(self, x: int, y: int, w: int, h: int, bg: int) -> None:
+        """给一块区域的所有 cell 填背景色(ch 不变)。用于 pi 风格的消息块背景。"""
+        for ry in range(max(0, y), min(y + h, self.rows)):
+            for rx in range(max(0, x), min(x + w, self.cols)):
+                c = self.grid[ry][rx]
+                self.grid[ry][rx] = Cell(ch=c.ch, style=replace(c.style, bg=bg), cont=c.cont)
 
 
 # ── diff 渲染 ─────────────────────────────────────────────────────────────

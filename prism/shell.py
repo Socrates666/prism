@@ -56,6 +56,7 @@ Screen { layout: vertical; }
 
         reasoning_buf: list[str] = []
         current_buf: list[str] = []
+        pending_tool: list = [None]     # 跨 start/end 的工具块引用(cell)
 
         def update_current() -> None:
             app.call_from_thread(current.update, "".join(current_buf))
@@ -70,8 +71,7 @@ Screen { layout: vertical; }
         def flush_reasoning() -> None:
             if reasoning_buf:
                 text = "".join(reasoning_buf).replace("[", "\\[")
-                app.call_from_thread(
-                    log.write, f"[dim italic]  {text}[/dim italic]")
+                app.call_from_thread(log.thinking, text)
                 reasoning_buf.clear()
 
         def emit(event: dict) -> None:
@@ -99,28 +99,21 @@ Screen { layout: vertical; }
             elif t == "tool_execution_start":
                 name = event.get("tool_name", "?")
                 args_str = _fmt_args(event.get("args", {}))
-                app.call_from_thread(
-                    log.write, f"[cyan]行动[/cyan] [dim]▸ {name}[/dim]"
-                    + (f"[dim]({args_str})[/dim]" if args_str else ""))
+                def _ts(n=name, a=args_str):
+                    pending_tool[0] = log.tool_start(n, a)
+                app.call_from_thread(_ts)
             elif t == "tool_execution_end":
-                mark = "[red]✗[/red]" if event.get("is_error") else "[green]✓[/green]"
                 result = _fmt_result(str(event.get("result", "")))
-                obs = "[red]观察[/red]" if event.get("is_error") else "[green]观察[/green]"
-                if result:
-                    app.call_from_thread(log.write, f"{obs} {mark} [dim]{result}[/dim]")
-                else:
-                    app.call_from_thread(log.write, f"{obs} {mark}")
+                is_err = event.get("is_error")
+                def _te(r=result, e=is_err):
+                    if pending_tool[0]:
+                        log.tool_end(pending_tool[0], r, e)
+                        pending_tool[0] = None
+                app.call_from_thread(_te)
             elif t == "cognitive":
                 stage = event.get("stage")
                 content = _fmt_result(str(event.get("content", ""))).replace("[", "\\[")
-                if stage == "intuition":
-                    app.call_from_thread(
-                        log.write, f"[magenta]直觉[/magenta] [dim]▸ {content}[/dim]")
-                elif stage == "reflect":
-                    bo = event.get("based_on", [])
-                    bo_str = f" [dim](based_on {bo})[/dim]" if bo else ""
-                    app.call_from_thread(
-                        log.write, f"[yellow]反思[/yellow] [dim italic]↺ {content}[/dim italic]{bo_str}")
+                app.call_from_thread(log.cognitive, stage, content, event.get("based_on"))
             elif t == "error":
                 flush_current()
                 app.call_from_thread(
@@ -167,7 +160,7 @@ Screen { layout: vertical; }
         if not text.strip():
             return
         log = self.query_one("#transcript")
-        log.write(f"[bold green]❯[/] {text}")
+        log.user(text)
         ns = self.agent.namespace
         stripped = text.strip()
 
@@ -244,16 +237,17 @@ Screen { layout: vertical; }
         return None
 
     def make_subagent_emit(self, name: str):
-        """给子 agent 的 emit: 事件汇入主 transcript, 带 [name] 标签。"""
+        """给子 agent 的 emit: 事件汇入主 transcript, 带 [name] 标签 + pi 风格块。"""
         log = self.query_one("#transcript")
         app = self
         buf: list[str] = []
+        pending: list = [None]
+        tag = f"[{name}] "
 
         def flush() -> None:
             if buf:
-                app.call_from_thread(log.write, f"[dim blue]┌[{name}][/dim blue]")
-                app.call_from_thread(log.write, "".join(buf))
-                app.call_from_thread(log.write, f"[dim blue]└[/dim blue]")
+                text = "".join(buf)
+                app.call_from_thread(log.write, f"[dim blue]{tag}[/dim blue]{text}")
                 buf.clear()
 
         def emit(event: dict) -> None:
@@ -270,27 +264,20 @@ Screen { layout: vertical; }
                 flush()
                 tool = event.get("tool_name", "?")
                 args_str = _fmt_args(event.get("args", {}))
-                app.call_from_thread(
-                    log.write,
-                    f"[dim blue]│[{name}][/dim blue] [cyan]行动[/cyan] [dim]▸ {tool}[/dim]"
-                    + (f"[dim]({args_str})[/dim]" if args_str else ""))
+                def _ts(n=tag + tool, a=args_str):
+                    pending[0] = log.tool_start(n, a)
+                app.call_from_thread(_ts)
             elif t == "tool_execution_end":
-                mark = "[red]✗[/red]" if event.get("is_error") else "[green]✓[/green]"
                 result = _fmt_result(str(event.get("result", "")))
-                obs = "[red]观察[/red]" if event.get("is_error") else "[green]观察[/green]"
-                app.call_from_thread(
-                    log.write, f"[dim blue]│[{name}][/dim blue] {obs} {mark} [dim]{result}[/dim]")
+                is_err = event.get("is_error")
+                def _te(r=result, e=is_err):
+                    if pending[0]:
+                        log.tool_end(pending[0], r, e); pending[0] = None
+                app.call_from_thread(_te)
             elif t == "cognitive":
                 stage = event.get("stage")
                 content = _fmt_result(str(event.get("content", ""))).replace("[", "\\[")
-                if stage == "intuition":
-                    app.call_from_thread(
-                        log.write, f"[dim blue]│[{name}][/dim blue] [magenta]直觉[/magenta] [dim]▸ {content}[/dim]")
-                elif stage == "reflect":
-                    bo = event.get("based_on", [])
-                    bo_str = f" [dim](based_on {bo})[/dim]" if bo else ""
-                    app.call_from_thread(
-                        log.write, f"[dim blue]│[{name}][/dim blue] [yellow]反思[/yellow] [dim italic]↺ {content}[/dim italic]{bo_str}")
+                app.call_from_thread(log.cognitive, stage, f"{tag}{content}", event.get("based_on"))
             elif t == "error":
                 flush()
                 app.call_from_thread(

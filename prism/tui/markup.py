@@ -12,6 +12,14 @@
 """
 from __future__ import annotations
 from dataclasses import dataclass, replace
+import unicodedata
+
+
+def char_width(ch: str) -> int:
+    """单字符显示宽度(1 或 2)。控制字符按 0。"""
+    if not ch or ord(ch) < 32:
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
 
 # ── 颜色名 → 256 色索引(0..255) ───────────────────────────────────────────
 # sgr() 再把索引转成 ANSI 码: <8 → 30+i, <16 → 90+(i-8), 否则 38;5;i
@@ -151,34 +159,17 @@ def parse_markup(text: str) -> list[tuple[str, Style]]:
 
 # ── 换行(保留样式) ───────────────────────────────────────────────────────
 def wrap_segments(segs: list[tuple[str, Style]], width: int) -> list[list[tuple[str, Style]]]:
-    """把样式段列表排成 width 列的若干行。跨行处保留样式。"""
+    """把样式段排成 width 列的若干行(按显示宽度, 支持全宽 CJK)。跨行保留样式。"""
     if width <= 0:
-        return [[s] if s[0] else [] for s in segs] or [[]]
+        return [list(segs)] if segs else [[]]
     rows: list[list[tuple[str, Style]]] = [[]]
     col = 0
-
-    def push(text: str, style: Style):
-        nonlocal col
-        rows[-1].append((text, style))
-        col += len(text)
-
     for text, style in segs:
-        k = 0
-        while k < len(text):
-            space = width - col
-            if space <= 0:
-                rows.append([])
-                col = 0
-                space = width
-            chunk = text[k:k + space]
-            push(chunk, style)
-            k += len(chunk)
-            if col >= width:
-                rows.append([])
-                col = 0
-    if not rows[-1] and len(rows) > 1:
-        # trailing empty line artifact
-        pass
+        for ch in text:
+            cw = char_width(ch)
+            if rows[-1] and col + cw > width:   # 放不下且本行非空 → 换行
+                rows.append([]); col = 0
+            rows[-1].append((ch, style)); col += cw
     return rows
 
 

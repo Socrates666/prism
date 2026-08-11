@@ -1,8 +1,7 @@
 """内置 widgets(对齐 textual 的命名: Header / RichLog / Static / Input) + Footer。"""
 from __future__ import annotations
 import time
-from .markup import Style, parse_markup, wrap_segments, strip_markup
-from .buffer import char_width
+from .markup import Style, parse_markup, wrap_segments, strip_markup, char_width
 from .widget import Widget
 
 
@@ -21,104 +20,212 @@ class Header(Widget):
 
     def draw(self, buf, x, y, w, h) -> None:
         accent = self.app.style("accent")
-        dim = self.app.style("dim")
         buf.write(x + 1, y, f"◆ {self.title}", accent)
         buf.write_markup(x + w - 1 - len(self.hint) - 1, y, f"[dim]{self.hint}[/dim]")
 
 
-# ── RichLog(可滚动 transcript) ─────────────────────────────────────────────
+# ── RichLog(可滚动 transcript, pi 风格块) ───────────────────────────────────
+class _LineUnit:
+    """一行(已 wrap)。"""
+    def __init__(self, row): self.row = row; self.height = 1
+    def draw(self, buf, x, y, w):
+        buf.write_segments(x, y, self.row)
+
+
+class _BlockUnit:
+    """带背景色的 pi 风格块(用户消息/工具调用/思考/认知)。"""
+    def __init__(self, b, body_rows):
+        self.b = b; self.body_rows = body_rows
+        self.height = 2 + max(1, len(body_rows))
+    def draw(self, buf, x, y, w):
+        b = self.b; h = self.height
+        buf.box(x, y, w, h, title=b["title"], border_style=b["border"], title_style=b["title_style"])
+        bg = b["bg"]
+        if bg is not None:
+            buf.fill_bg(x + 1, y + 1, w - 2, h - 2, bg)
+        rows = self.body_rows or [[]]
+        for r, row in enumerate(rows):
+            segs = [(t, s.merge(Style(bg=bg))) for t, s in row] if bg is not None else row
+            buf.write_segments(x + 2, y + 1 + r, segs)
+
+
 class RichLog(Widget):
-    """滚动日志区。write(markup) 追加一行; PgUp/PgDn/Home/End 滚动。"""
+    """滚动日志区, pi 风格块状条目。
+
+    - write(markup)         普通行(向后兼容)
+    - user(text)            用户消息块(背景)
+    - tool_start(...)→ref   工具调用 pending 块, 返回可变引用
+    - tool_end(ref, ...)    升级为 success/error 块
+    - thinking(text)        思考块(dim italic, 背景)
+    - cognitive(...)        认知块(直觉/反思)
+    """
     can_focus = False
 
     def __init__(self, id: str | None = None, wrap: bool = True) -> None:
         super().__init__(id)
         self.wrap = wrap
-        self.lines: list[str] = []
-        self._scroll: int | None = None   # None = 自动贴底
-        self._cache_w = -1
-        self._rows: list[list[tuple[str, Style]]] = []
+        self.entries: list = []          # [("line", markup)] 或 [("block", dict)]
+        self._follow = True              # 贴底跟随
+        self._top = 0                    # 顶部跳过的 unit 数
+        self._cache_iw = -1
+        self._units: list = []
+        self._last_ih = 24
 
-    # ── 内容 ─────────────────────────────────────────────────────────────
+    # ── 内容 API ────────────────────────────────────────────────────────
+    @property
+    def lines(self) -> list[str]:
+        """纯文本快照(测试兼容)。"""
+        out = []
+        for kind, payload in self.entries:
+            if kind == "line":
+                out.append(payload)
+            else:
+                if payload.get("title"):
+                    out.append(payload["title"])
+                out.extend(payload["body"])
+        return out
+
+    def _invalidate(self) -> None:
+        self._cache_iw = -1
+
     def write(self, markup: str) -> None:
         for piece in markup.split("\n"):
-            self.lines.append(piece)
-        if self._scroll is None:
-            pass  # 贴底, draw 时自然显示最新
-        else:
-            self._scroll += markup.count("\n") + 1  # 跟随新内容
+            self.entries.append(("line", piece))
+        self._invalidate()
 
     def clear(self) -> None:
-        self.lines.clear()
-        self._cache_w = -1
+        self.entries.clear(); self._invalidate()
 
-    # ── 滚动 ─────────────────────────────────────────────────────────────
+    def user(self, text: str) -> None:
+        self.entries.append(("block", {
+            "title": " you ", "title_style": self._st("user"),
+            "border": self._st("user"), "bg": self._bg("user_bg"),
+            "body": [text],
+        }))
+        self._invalidate()
+
+    def tool_start(self, name: str, args_str: str = "") -> dict:
+        title = f" ⚙ {name} " + (f"({args_str}) " if args_str else "")
+        b = {
+            "title": title, "title_style": self._st("accent"),
+            "border": self._st("dim"), "bg": self._bg("tool_pending_bg"),
+            "body": [""],
+        }
+        self.entries.append(("block", b))
+        self._invalidate()
+        return b
+
+    def tool_end(self, ref: dict, result: str, is_error: bool) -> None:
+        if is_error:
+            ref["title"] = ref["title"].replace("⚙", "✗", 1)
+            ref["title_style"] = self._st("error")
+            ref["border"] = self._st("error")
+            ref["bg"] = self._bg("tool_error_bg")
+            ref["body"] = [result] if result else ["(error)"]
+        else:
+            ref["title"] = ref["title"].replace("⚙", "✓", 1)
+            ref["title_style"] = self._st("success")
+            ref["border"] = self._st("success")
+            ref["bg"] = self._bg("tool_success_bg")
+            ref["body"] = [result] if result else ["(done)"]
+        self._invalidate()
+
+    def thinking(self, text: str) -> None:
+        self.entries.append(("block", {
+            "title": " thinking ", "title_style": self._st("dim"),
+            "border": self._st("border_muted"), "bg": self._bg("thinking_bg"),
+            "body": [text],
+        }))
+        self._invalidate()
+
+    def cognitive(self, stage: str, content: str, based_on=None) -> None:
+        label = {"intuition": "◈ intuition", "reflect": "↺ reflect"}.get(stage, stage)
+        body = content + (f"  (based_on {based_on})" if based_on else "")
+        self.entries.append(("block", {
+            "title": f" {label} ",
+            "title_style": self._st("warning" if stage == "reflect" else "accent"),
+            "border": self._st("border_muted"), "bg": self._bg("cognitive_bg"),
+            "body": [body],
+        }))
+        self._invalidate()
+
+    def _st(self, tok: str) -> Style:
+        return self.app.style(tok) if self.app else Style()
+
+    def _bg(self, tok: str):
+        return self.app.style(tok) if self.app else None
+
+    # ── 滚动(unit 粒度, 块始终完整) ─────────────────────────────────────
     def _disp_w(self) -> int:
-        return self._cache_w if self._cache_w > 0 else 80
+        return self._cache_iw if self._cache_iw > 0 else 76
 
-    def scroll_up(self, n: int) -> None:
-        total = len(self._ensure_rows(self._disp_w()))
-        if self._scroll is None:
-            self._scroll = total
-        self._scroll = max(0, self._scroll - n)
+    def _ensure_units(self, iw: int) -> list:
+        if iw != self._cache_iw:
+            self._cache_iw = iw
+            self._units = []
+            body_iw = max(1, iw - 4)
+            for kind, payload in self.entries:
+                if kind == "line":
+                    segs = parse_markup(payload)
+                    rows = wrap_segments(segs, iw) if self.wrap else [segs]
+                    for row in (rows or [[]]):
+                        self._units.append(_LineUnit(row))
+                else:
+                    body_rows = []
+                    for ln in payload["body"]:
+                        body_rows += wrap_segments(parse_markup(ln), body_iw) or [[]]
+                    self._units.append(_BlockUnit(payload, body_rows))
+        return self._units
 
-    def scroll_down(self, n: int) -> None:
-        if self._scroll is None:
-            return
-        self._scroll += n
-        total = len(self._ensure_rows(self._disp_w()))
-        if self._scroll >= total:
-            self._scroll = None
+    def _bottom_start(self, ih: int) -> int:
+        units = self._ensure_units(self._disp_w())
+        start = len(units); acc = 0
+        while start > 0 and acc + units[start - 1].height <= ih:
+            start -= 1; acc += units[start].height
+        return start
+
+    def scroll_up(self, n: int = 3) -> None:
+        if self._follow:
+            self._follow = False
+            self._top = self._bottom_start(self._last_ih)
+        self._top = max(0, self._top - n)
+
+    def scroll_down(self, n: int = 3) -> None:
+        self._follow = False
+        self._top += n
+        if self._top >= len(self._ensure_units(self._disp_w())):
+            self._follow = True
 
     def scroll_home(self) -> None:
-        self._scroll = 0
+        self._follow = False; self._top = 0
 
     def scroll_end(self) -> None:
-        self._scroll = None
+        self._follow = True
 
     # ── 布局/绘制 ─────────────────────────────────────────────────────────
     def measure(self, width: int) -> int:
-        return 1  # transcript 通常是 fr, 不靠 measure
-
-    def _inner(self, w: int, h: int) -> tuple[int, int, int, int]:
-        """(ix, iy, iw, ih) 内容区(去掉边框 + padding)。"""
-        return 2, 1, max(1, w - 4), max(1, h - 2)
-
-    def _ensure_rows(self, iw: int) -> list[list[tuple[str, Style]]]:
-        if iw != self._cache_w:
-            self._cache_w = iw
-            self._rows = []
-            for ln in self.lines:
-                segs = parse_markup(ln)
-                wrapped = wrap_segments(segs, iw) if self.wrap else [segs]
-                if not wrapped:
-                    wrapped = [[]]
-                self._rows.extend(wrapped)
-        return self._rows
+        return 1
 
     def draw(self, buf, x, y, w, h) -> None:
-        ix, iy, iw, ih = self._inner(w, h)
-        # 边框
-        border = self.app.style("border_muted")
-        buf.box(x, y, w, h, border_style=border)
-        rows = self._ensure_rows(iw)
-        total = len(rows)
-        # 决定可视窗口
-        if self._scroll is None:
-            start = max(0, total - ih)
-        else:
-            start = min(self._scroll, max(0, total - ih))
-        # 顶部滚动指示
+        ix, iy, iw, ih = x + 2, y + 1, max(1, w - 4), max(1, h - 2)
+        self._last_ih = ih
+        buf.box(x, y, w, h, border_style=self.app.style("border_muted"))
+        units = self._ensure_units(iw)
+        total = len(units)
+        start = self._bottom_start(ih) if self._follow else max(0, min(self._top, total))
+        if self._follow:
+            self._top = start
         if start > 0:
-            buf.write(x + w - 3, y, "▲", self.app.style("dim"))
-        if start + ih < total:
-            buf.write(x + w - 3, y + h - 1, "▼", self.app.style("dim"))
-        # 绘制可见行
-        for r in range(ih):
-            idx = start + r
-            if idx >= total:
+            buf.write(x + w - 2, y, "▲", self.app.style("dim"))
+        vis_h = sum(u.height for u in units[start:])
+        if start < total and vis_h > ih:
+            buf.write(x + w - 2, y + h - 1, "▼", self.app.style("dim"))
+        yy = iy
+        for u in units[start:]:
+            if yy + u.height > iy + ih:
                 break
-            buf.write_segments(ix, y + iy + r, rows[idx])
+            u.draw(buf, ix, yy, iw)
+            yy += u.height
 
 
 # ── Static(单块静态文本, streaming 缓冲) ────────────────────────────────────

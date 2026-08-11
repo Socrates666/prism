@@ -27,6 +27,9 @@ DARK = {
     "muted": Style(dim=True), "dim": Style(dim=True), "text": Style(),
     "thinking_text": Style(dim=True, italic=True),
     "border_muted": Style(fg=238, dim=True), "user": Style(fg=2),
+    # pi 风格块背景(256 色索引)
+    "user_bg": 236, "tool_pending_bg": 236, "tool_success_bg": 22,
+    "tool_error_bg": 52, "thinking_bg": 235, "cognitive_bg": 237,
 }
 LIGHT = {
     "accent": Style(fg=4), "primary": Style(fg=5),
@@ -34,6 +37,8 @@ LIGHT = {
     "muted": Style(dim=True), "dim": Style(dim=True), "text": Style(),
     "thinking_text": Style(dim=True, italic=True),
     "border_muted": Style(fg=250, dim=True), "user": Style(fg=2),
+    "user_bg": 254, "tool_pending_bg": 254, "tool_success_bg": 194,
+    "tool_error_bg": 217, "thinking_bg": 254, "cognitive_bg": 253,
 }
 
 
