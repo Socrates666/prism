@@ -86,7 +86,7 @@ class RichLog(Widget):
         self._cache_iw = -1
 
     def write(self, markup: str) -> None:
-        for piece in markup.split("\n"):
+        for piece in (markup or "").split("\n"):
             self.entries.append(("line", piece))
         self._invalidate()
 
@@ -156,7 +156,8 @@ class RichLog(Widget):
                 else:
                     body_rows = []
                     for ln in payload["body"]:
-                        body_rows += wrap_segments(parse_markup(ln), body_iw) or [[]]
+                        for sub in ln.split("\n"):       # 多行内容按行拆(对齐 write)
+                            body_rows += wrap_segments(parse_markup(sub), body_iw) or [[]]
                     self._units.append(_BlockUnit(payload, body_rows))
         return self._units
 

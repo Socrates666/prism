@@ -62,7 +62,11 @@ def layout(widgets: list[Widget], styles, total_h: int, width: int) -> list[tupl
             needs.append(hgt)
             fixed_sum += hgt
         elif kind == "auto":
-            hgt = max(cs.min_height, w_.measure(width))
+            try:
+                m = w_.measure(width)
+            except Exception:
+                m = 1                       # 扩展 widget measure 抛异常 → 降级, 不炸渲染
+            hgt = max(cs.min_height, m)
             needs.append(hgt)
             fixed_sum += hgt
         else:  # fr
