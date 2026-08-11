@@ -26,7 +26,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .cognitive import Forest, ACTIVE, CAUSES
+from .cognitive import Forest, ACTIVE, CAUSES, THINKING
 
 
 class SQLiteForest(Forest):
@@ -224,6 +224,73 @@ class SQLiteForest(Forest):
             "ORDER BY id DESC LIMIT 1",
             (self.session_id,)).fetchone()
         return int(row["tree_id"]) if row else None
+
+    def prune(self, root: int, summary: str) -> int:
+        """剪枝: root 的 causes 子树压成一个摘要节点存回(cycle.md 第三触发器)。
+
+        语义: 物理删子树节点+内部边; summary 节点占 root 的 causes 位置;
+              外部入边重连到 summary; 单事务原子。
+        复杂度 O(K' + E_affected): 递归 CTE 收集子树 + 临时表 hash join 找外部入边。
+        返回 summary id; root 不存在 / summary 空 → -1(不改树)。
+        """
+        if not summary or not summary.strip():
+            return -1
+        root_row = self._conn.execute(
+            "SELECT * FROM nodes WHERE id=?", (root,)).fetchone()
+        if root_row is None:
+            return -1
+        parent_id = root_row["parent_id"]
+        tree_id = root_row["tree_id"]
+        # 收集子树全部节点 id(递归 CTE, O(K'))
+        sub_ids = [r["id"] for r in self._conn.execute(
+            "WITH RECURSIVE desc(id) AS ("
+            "  SELECT id FROM nodes WHERE id=?"
+            "  UNION ALL"
+            "  SELECT e.dst FROM edges e JOIN desc ON e.src=desc.id WHERE e.relation=?"
+            ") SELECT id FROM desc", (root, CAUSES)).fetchall()]
+        # 单事务: 建 summary → 重连外部入边 → 删子树边 → 删子树节点
+        try:
+            cur = self._conn.execute(
+                "INSERT INTO nodes(session_id, tree_id, parent_id, category, type, "
+                "status, content, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (self.session_id, tree_id, parent_id, THINKING, "summary",
+                 ACTIVE, summary, time.time()))
+            summary_id = cur.lastrowid
+            if parent_id is not None:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO edges(src, relation, dst) VALUES (?,?,?)",
+                    (parent_id, CAUSES, summary_id))
+            # 临时表存子树 id: 绕开 IN 列表上限 + hash join 高效
+            self._conn.execute("CREATE TEMP TABLE _prune_ids(id INTEGER PRIMARY KEY)")
+            self._conn.executemany("INSERT INTO _prune_ids VALUES(?)",
+                                   [(i,) for i in sub_ids])
+            # 外部入边(dst 在子树, src 不在) → 重连到 summary(保外部认知关联)
+            ext_in = self._conn.execute(
+                "SELECT e.src, e.relation FROM edges e "
+                "JOIN _prune_ids ON e.dst=_prune_ids.id "
+                "LEFT JOIN _prune_ids AS s2 ON e.src=s2.id "
+                "WHERE s2.id IS NULL").fetchall()
+            if ext_in:
+                self._conn.executemany(
+                    "INSERT OR IGNORE INTO edges(src, relation, dst) VALUES(?,?,?)",
+                    [(s, rel, summary_id) for s, rel in ext_in])
+            # 删子树相关边(src 或 dst 在子树) + 子树节点
+            self._conn.execute(
+                "DELETE FROM edges WHERE src IN (SELECT id FROM _prune_ids) "
+                "OR dst IN (SELECT id FROM _prune_ids)")
+            self._conn.execute(
+                "DELETE FROM nodes WHERE id IN (SELECT id FROM _prune_ids)")
+            self._conn.execute("DROP TABLE _prune_ids")
+            self._conn.commit()
+            return summary_id
+        except Exception:
+            self._conn.rollback()           # 原子: 失败不留半截树
+            try:
+                self._conn.execute("DROP TABLE IF EXISTS _prune_ids")
+                self._conn.commit()
+            except Exception:
+                pass
+            raise
 
     def close(self) -> None:
         self._conn.close()

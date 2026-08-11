@@ -96,9 +96,18 @@ class Forest(ABC):
             nodes = nodes[-limit:]
         return nodes
 
-    def prune(self, root: int) -> int:
-        """剪枝: 老子树压成摘要节点存回(plan/rlm/cycle.md 第三触发器)。
-        默认 no-op(子类 override)。返回摘要节点 id, 未实现返回 -1。"""
+    def prune(self, root: int, summary: str) -> int:
+        """剪枝: 把 root 的 causes 子树压成一个摘要节点存回(cycle.md 第三触发器)。
+
+        结构阈值触发(树超规模 / 任务边界): 控膨胀。
+        语义:
+          - 物理删除子树全部节点 + 子树内部边
+          - 新建 summary 节点(type="summary"), 占 root 的 causes 位置(parent=root.parent)
+          - 子树外指向子树内节点的入边(based_on/references/...)重连到 summary(保外部认知关联)
+          - 单事务原子(all-or-nothing)
+        摘要文本由调用方传入(forest 不依赖 LLM, 机制/策略分离)。
+        返回 summary 节点 id; root 不存在或 summary 空 → 返回 -1(不改树)。
+        默认 no-op(子类 override)。"""
         return -1
 
 

@@ -129,7 +129,7 @@ WAL 模式下 commit 只写 WAL 文件 (顺序写, 不强制 fsync), 常规 comm
 
 ## 6. 验证
 
-- **认知层测试 27/27 全绿**: `test_forest` (10) + `test_cog_cycle` + `test_cog_hooks` + `test_cog_tools` + `test_cog_transparency`。ABC 兼容、NullForest 降级、持久化、两轴隔离、回溯全验证。
+- **认知层测试 33/33 全绿**: `test_forest` (16, 含 6 个 prune) + `test_cog_cycle` + `test_cog_hooks` + `test_cog_tools` + `test_cog_transparency`。ABC 兼容、NullForest 降级、持久化、两轴隔离、回溯、**剪枝**全验证。
 - 全套 217 测试中 18 个失败均为 `openai.OpenAIError` (worktree 缺 `.env` API key), 与算法改动无关。
 - benchmark 可复现: `python research/complexity_bench.py`。
 
@@ -144,3 +144,50 @@ WAL 模式下 commit 只写 WAL 文件 (顺序写, 不强制 fsync), 常规 comm
 - **递归 CTE 搜索本身** (`subtree`/`walk`) 本就 O(可达数) 最优, 无需改动。
 
 写入常数级、读取热路径近常数级, 认知循环不再被数据库拖累。
+
+---
+
+## 8. 补充: prune 实现 (剪枝, 补全 ABC 声明)
+
+初版研究聚焦"搜索/增加节点", 漏了 ABC 声明但 SQLiteForest 未实现的 `prune` (原继承 ABC 的 `return -1`, 从不工作)。本节补全。
+
+### 语义 (cycle.md 第三触发器)
+
+结构阈值触发 (树超规模 / 任务边界), 把 root 的 causes 子树压成一个摘要节点存回, 控膨胀。
+
+```
+剪枝前:                              剪枝后:
+  P (root 的父)                       P
+  │ causes                            │ causes
+  ├─ ROOT ─┐                         └─ [SUMMARY] summary(调用方传入) type="summary"
+  │   ├─ c1                              占 ROOT 的 causes 位置
+  │   ├─ c2 (failed)
+  │   └─ c3                           子树内部节点+边: 物理删除
+                                      单事务原子(all-or-nothing)
+外部 X ──based_on──▶ c2              外部 X ──based_on──▶ SUMMARY (重连, 保外部认知关联)
+```
+
+### 决策
+
+1. 摘要文本由调用方传入 (`summary: str`) —— forest 不依赖 LLM (机制/策略分离)。
+2. 物理删除旧节点 (真剪枝释放空间)。
+3. SUMMARY 占 ROOT 的 causes 位置 (`parent=root.parent`) —— 保搜索树连续。
+4. 外部入边 (src 在子树外, dst 在子树内) 重连到 SUMMARY —— 保外部认知关联 (based_on/references) 不丢。
+5. 子树内部边连同节点删除。
+6. 单事务原子 (失败 rollback, 不留半截树)。
+7. 临时表存子树 id —— 绕开 SQLite IN 列表上限 + hash join 找外部入边高效。
+
+### 复杂度 O(K' + E_affected) (信息论下界)
+
+| K (子树节点数) | prune 耗时 (μs, median of 5) |
+|---:|---:|
+| 100 | 737 |
+| 1000 | 4339 |
+| 3000 | 12721 |
+| 6000 | 24036 |
+
+线性于子树规模 (K 涨 60×, 耗时涨 33×): 必须访问+删除每个子树节点, 无法更优。属结构阈值触发的偶发 WRITE, 24ms (K=6000) 可接受。
+
+### 验证
+
+`test_forest.py` 加 6 个 prune 测试全绿: 子树压扁、causes 位置继承、外部 based_on 重连、空 summary 守门、root 不存在、NullForest 降级。认知层 33/33。
