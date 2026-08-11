@@ -72,6 +72,30 @@ class Forest(ABC):
     def walk(self, node: int, relation: str, depth: int | None = None) -> list[dict]:
         """沿指定边递归走。causes→搜索链; based_on→自指链(套娃路径)。"""
 
+    # ── 搜索辅助(带默认实现, SQLiteForest override 成索引友好) ──
+    def last_tree_id(self) -> int | None:
+        """最新树的 tree_id; None=本 session 无节点。
+        直觉 search-state 的入口(O(1) 优于 trees() 全扫)。
+        默认实现走 trees()[-1]; SQLiteForest override 用 id 倒序 LIMIT 1。
+        """
+        ts = self.trees()
+        return ts[-1] if ts else None
+
+    def recent_in_tree(self, tree_id: int, *, type: str | None = None,
+                       status: str | None = None, limit: int | None = None) -> list[dict]:
+        """某树内按 (type, status) 过滤的最近 limit 个节点(时间正序)。
+        直觉热路径用这个: 期望 O(limit), 不随树规模线性增长。
+        默认实现走 nodes_in_tree + 内存过滤(O(K)); SQLiteForest override 走覆盖索引 O(L)。
+        """
+        nodes = self.nodes_in_tree(tree_id)
+        if type is not None:
+            nodes = [n for n in nodes if n.get("type") == type]
+        if status is not None:
+            nodes = [n for n in nodes if n.get("status") == status]
+        if limit is not None:
+            nodes = nodes[-limit:]
+        return nodes
+
     def prune(self, root: int) -> int:
         """剪枝: 老子树压成摘要节点存回(plan/rlm/cycle.md 第三触发器)。
         默认 no-op(子类 override)。返回摘要节点 id, 未实现返回 -1。"""
