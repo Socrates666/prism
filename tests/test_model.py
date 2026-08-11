@@ -135,14 +135,6 @@ def _model_with(client, thinking_level=None, first_timeout=0.4):
     return m
 
 
-def test_chat_stream_fallback_when_stream_hangs():           # 流式空→首超时→非流式
-    resp = _Resp(_Msg(content="fallback-ok"))
-    client, calls = _fake_client(nonstream_resp=resp, hang_stream=True)
-    events = list(_model_with(client).chat_stream([{"role": "user", "content": "x"}]))
-    assert [e["text"] for e in events if e["type"] == "delta"] == ["fallback-ok"]
-    assert len(calls) == 2 and calls[0]["stream"] is True and calls[1]["stream"] is False
-
-
 def test_chat_stream_yields_reasoning_content():              # reasoning_content→reasoning 事件
     chunk = _Chunk(_Delta(content="ans", reasoning_content="thinking..."))
     client, _ = _fake_client(stream_chunks=[chunk])
@@ -158,14 +150,11 @@ def test_thinking_off_sends_enable_thinking_false():          # thinking_level=o
     assert calls[0].get("extra_body") == {"enable_thinking": False}
 
 
-def test_non_stream_tool_calls_parsed():                      # fallback 非流式 tool_calls
-    tc = _TC("id1", _Fn(name="echo", arguments='{"x":1}'))
-    resp = _Resp(_Msg(content=None, tool_calls=[tc]))
-    client, _ = _fake_client(nonstream_resp=resp, hang_stream=True)
+def test_chat_stream_no_fallback_pure_stream():               # 纯流式: producer 慢也不 fallback, 等它结束
+    client, calls = _fake_client(stream_chunks=[_Chunk(_Delta(content="ok"))], hang_stream=True)
     events = list(_model_with(client).chat_stream([{"role": "user", "content": "x"}]))
-    done = next(e for e in events if e["type"] == "done")
-    assert done["tool_calls"] == [{"id": "id1", "type": "function",
-                                    "function": {"name": "echo", "arguments": '{"x":1}'}}]
+    assert [e["text"] for e in events if e["type"] == "delta"] == ["ok"]
+    assert all(c.get("stream") is True for c in calls)        # 没有非流式调用
 
 
 def test_producer_error_propagates():                         # producer 抛→raise

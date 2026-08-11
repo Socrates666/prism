@@ -195,6 +195,8 @@ def spawn(name: str, model, *, file_tools: bool = True, project_tools: bool = Fa
     agent.workspace = ws
     if emit is not None:
         agent.hooks["emit"] = emit
+    elif parent is not None and parent.hooks.get("emit"):
+        agent.hooks["emit"] = parent.hooks["emit"]   # 继承父 emit, 避免默认 _default_emit print 跳出 TUI
     if parent is not None:
         parent.namespace[name] = agent   # 父 agent 能 inject/读子 agent(原则 16)
     return agent

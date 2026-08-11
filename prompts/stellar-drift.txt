@@ -1,0 +1,58 @@
+@Prism 现在就用 python 工具做单文件太空射击游戏「Stellar Drift」(内联 CSS+JS, 零外部依赖), 保存到 game/index.html。这次必须用子 agent 协作(验证你的 spawn 能力)。
+
+【执行纪律 · 最重要】
+1. 第一个动作必须是 python 工具, 不要先说计划。
+2. 每一轮都必须以 python 工具调用结束。禁止"我将…/接下来…"作为结尾。
+3. 自检也是 python 工具, 不是文字描述。
+
+【★ 子 agent 协作 · 必做(本次测试重点)】
+你有一个 spawn 能力。这次必须真用一个子 agent 分工, 验证链路:
+1. 用 python 工具 spawn 一个子 agent(名叫 wave-designer):
+   ```
+   from prism.spawn import spawn
+   wd = spawn("wave-designer", Prism.model, parent=Prism)
+   ```
+2. 给它派活(inject), 让它独立写"敌人波次生成 + 敌人类型"模块(纯函数, 存到它的 workspace):
+   ```
+   wd.inject({"type": "run", "input": "你是 wave-designer 子 agent。用 write 工具把敌人波次模块写到 waves.js：导出 window.testWave(n) 返回第 n 波的敌人序列(数组, 每元素 {type, hp, speed, x})；至少 3 种敌人(scout 快低血/cruiser 中中/battleship 慢高血), 每 5 波出一个 boss。波次表用纯函数算。写完告诉我文件路径。"})
+   ```
+3. 轮询等它做完, 读它的产出:
+   ```
+   import time
+   while not wd.last_result: time.sleep(2)   # 或读 wd.messages
+   print(wd.last_result)
+   # 读它写的文件
+   open("workspaces/wave-designer/waves.js", encoding="utf-8").read()
+   ```
+4. 把 waves.js 内容内联进 game/index.html, 集成到主游戏循环。
+TUI 里应能看到 [wave-designer] 子 agent 的输出(行动/观察带标签) —— 这就是子 agent 协作的白盒证据。如果 spawn/inject/读结果任一步失败, 用 python 调试并报告。
+
+【素材库 · 可用网站(CC0/免费)】
+需要飞船/敌人/子弹/爆炸精灵 + 音效。从下面任选下载, 或用 Canvas 程序绘制占位精灵(也行):
+- Kenney.nl — https://kenney.nl/assets — ★推荐, CC0 免登录, 有「Space Shooter Redux」「Space Shooter Extension」整套精灵+音效
+- OpenGameArt.org — https://opengameart.org — CC0/CC-BY 游戏素材(搜 "space shooter")
+- itch.io 免费素材 — https://itch.io/game-assets/free — 大量免费精灵包
+- freesound.org — https://freesound.org — CC 音效(射击/爆炸/背景乐, 需注册)
+- Pixabay — https://pixabay.com — CC0 图片/音效
+下载用 python(requests/urllib); 若下载受限, 就用 Canvas 程序画精灵(几何形状+颜色, 风格统一即可)。素材放 game/assets/。
+
+【游戏 · Stellar Drift】
+- 玩家: 方向键/AD 移动, 空格射击。HP/分数/波次。
+- 敌人: 从顶部下来, 多种(scout/cruiser/battleship + 每5波 boss), 波次用子 agent 写的 waves.js。
+- 战斗: 子弹击中敌人扣血, 敌人撞玩家或到底扣 HP。爆炸效果(精灵或粒子)。
+- 道具: 偶尔掉落(回血/双发/护盾)。
+- 音效: 射击/爆炸/受伤(从素材库下或 WebAudio 合成)。
+- 进度: 无限波次越来越难, 最高分存 localStorage。死亡重开。
+- UI: 画布 + 侧栏(HP/分数/波次/最高分)。暗色太空主题, 星空背景滚动。
+
+【可测性 · 暴露纯函数】
+  window.testWave = (n) => 第 n 波敌人序列   // ← 来自子 agent 的 waves.js
+  window.testCollide = (a, b) => 是否碰撞
+  window.testSpawn = (type) => 敌人对象 {type,hp,speed,x}
+
+【完成判据】
+1. ★ 子 agent wave-designer 被 spawn + inject + 读结果 + 集成 全链路走通(TUI 有 [wave-designer] 输出)
+2. game/index.html 可玩(移动/射击/敌人波次/碰撞/爆炸/道具/音效/死亡重开)
+3. testWave/testCollide/testSpawn 三个纯函数对
+4. 素材要么下载自上面网站, 要么 Canvas 程序生成(说明来源)
+全部做完用文字报告完成 + 给绝对路径。完成后调一次 reflect 总结"主子 agent 协作哪里顺、哪里卡"。

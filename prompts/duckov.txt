@@ -1,0 +1,59 @@
+@Prism 现在就用 python 工具做单文件俯视战术搜刮射击游戏「逃离鸭科夫」(Escape from Duckov, 内联 CSS+JS 零依赖), 保存到 duckov/index.html。硬核恶搞塔科夫, 复杂度高, 必须用子 agent 分工。
+
+【执行纪律 · 最重要】
+1. 第一个动作必须是 python 工具, 不要先说计划。
+2. 每一轮必须以 python 工具调用结束。禁止"我将…/接下来…"结尾。
+3. 自检也是 python 工具。
+
+【★ 子 agent 协作 · 必做(本次测试重点)】
+必须 spawn 两个子 agent 分模块, 验证多子 agent 协作:
+```
+from prism.spawn import spawn
+mapper = spawn("map-designer", Prism.model, parent=Prism)
+inv = spawn("inventory-designer", Prism.model, parent=Prism)
+mapper.inject({"type":"run","input":"你是 map-designer。用 write 工具写 map.js 到你 workspace: 导出 window.testMapGen(seed) 返回 {grid(二维数组,墙/地/掩体/撤离点/物品点), extractPoints(撤离点坐标数组), lootSpots(物品点坐标数组)}。随机生成城市废墟(建筑+巷道), 保证撤离点可达。写完报路径。"})
+inv.inject({"type":"run","input":"你是 inventory-designer。用 write 写 inventory.js: window.testInventoryAdd(grid, item) 返回加物品后的库存(物品占格, 满则拒); window.testLoot(container) 返回容器内物品数组。4×4 网格, 武器2格/医疗1格/杂物1格。写完报路径。"})
+# 轮询两个子 agent, 都做完再读文件集成
+import time
+while not (mapper.last_result and inv.last_result): time.sleep(2)
+map_js = open("workspaces/map-designer/map.js",encoding="utf-8").read()
+inv_js = open("workspaces/inventory-designer/inventory.js",encoding="utf-8").read()
+# 内联进 duckov/index.html
+```
+TUI 应能看到两个子 agent 并发跑(它们的行动/观察混在 transcript 里)。任一步失败用 python 调试并报告。
+
+【素材 · 主动读 skill(prism 不自动加载 skill)】
+prism 不会自动加载 skill(且 /skill 命令未实现), 第一步主动用 python 读 game-asset-finder skill 获取素材库:
+```
+skill = open("ext/skills/game-asset-finder/SKILL.md", encoding="utf-8").read()
+print(skill)   # 含 Kenney/OpenGameArt/itch/CraftPix/freesound 等, 按类型+许可分类
+```
+按 skill 指导找素材(它比这里列的全)。鸭子精灵推荐 Canvas 程序画(椭圆身+橙嘴+眼, 简单统一); 枪声用 WebAudio 合成或从 skill 推荐的音效站下。素材放 duckov/assets/, 注明来源+许可。
+
+【游戏 · 逃离鸭科夫(俯视 twin-stick 搜刮射击)】
+- 玩家: 鸭子。WASD 移动, 鼠标瞄准, 左键射击。HP/部位/背包。
+- 地图: 用 map-designer 的 testMapGen 生成城市废墟(墙/掩体/巷道), 散落物品点(箱子/鸭尸), 1-2 个蓝色撤离点。
+- 射击: 子弹飞行+碰撞。武器 ≥3(呱呱手枪/霰弹面包圈/步枪), 各有散布/伤害/射速。
+- 搜刮: 走近物品点按 E 开搜刮界面, 选物品拿取(受库存限制, 用 inventory-designer 的 testInventoryAdd)。
+- 库存: 4×4 网格(用子 agent 的), 武器2格/医疗1格/杂物1格。满了拿不动。
+- 受伤(硬核): 6 部位(头/胸/腹/左臂/右臂/双腿)各 HP。腿伤→移速降, 臂伤→射击散布大, 头/胸清零→死。暴露 window.testDamage(part, dmg)。
+- 医疗: 绷带(止血)/夹板(治腿)/急救包(全治), 对应部位。
+- 敌人: Scav 灰鸭, AI 巡逻→视野发现→追击→射击, 不同武器。暴露 window.testEnemyAI(enemy, player, grid)。
+- 撤离: 走到撤离点按住 F 倒计时 10s, 撤出带物品进仓库; 被打断(受伤/离开)重置。
+- 仓库: 撤出物品存 localStorage, 下局可带装备入场。
+- 恶搞: 呱呱音效(射击/受伤/搜刮)、面包圈(货币)、鸭蛋(高价物品)、Boss 波格丹大鸭(重装备)。
+- UI: 画布(俯视地图+鸭) + 侧栏(部位HP/背包网格/武器/货币) + 搜刮弹窗。暗色废墟风。
+
+【可测性 · 暴露 5 个纯函数】
+  window.testMapGen = (seed) => {grid, extractPoints, lootSpots}   // 子 agent
+  window.testInventoryAdd = (grid, item) => 加后库存                // 子 agent
+  window.testLoot = (container) => 物品数组                          // 子 agent
+  window.testDamage = (part, dmg) => 部位状态+debuff                // 主 agent
+  window.testEnemyAI = (enemy, player, grid) => 行动决策             // 主 agent
+
+【完成判据】
+1. ★ 两个子 agent spawn+inject+读结果+集成 全链路通(TUI 看到它们干活)
+2. duckov/index.html 可玩一局完整循环: 进图→搜刮→战斗→受伤/医疗→撤离→物品进仓库→重开
+3. 5 个纯函数对
+4. 素材来源说明(下载 or Canvas 生成)
+全做完文字报告 + reflect 总结"多子 agent 并发协作哪里顺/哪里卡"。

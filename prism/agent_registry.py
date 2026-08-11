@@ -97,7 +97,7 @@ def restore_agents(app, emit):
             agent = Agent(name, model, kind="main",
                          registry=default_registry, memory=memory,
                          max_turns=cfg.get("max_turns", 20),
-                         thinking_level=cfg.get("thinking_level", "off"))
+                         thinking_level=cfg.get("thinking_level", "medium"))
             _apply_prompt_from_config(agent, cfg)
             agent.hooks["emit"] = emit
             main_agent = agent

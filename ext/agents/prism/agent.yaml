@@ -1,7 +1,7 @@
 name: Prism
 kind: main
 max_turns: 20
-thinking_level: 'off'
+thinking_level: 'medium'
 tools:
 - python
 - search

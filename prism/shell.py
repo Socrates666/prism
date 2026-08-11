@@ -5,12 +5,35 @@
 from __future__ import annotations
 
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Input, RichLog, Static
+from textual.binding import Binding
+from textual.containers import Horizontal
+from textual.widgets import Button, Header, RichLog, Static, TextArea
 
 
 class Transcript(RichLog):
-    """transcript 显示区。can_focus=False: 点击不抢 Input 焦点。"""
+    """transcript 显示区。can_focus=False: 点击不抢 dock 焦点。"""
     can_focus = False
+
+
+class DockInput(TextArea):
+    """多行输入 dock。Shift+Enter 提交, Enter 换行(支持粘贴长 prompt / 多行代码)。
+
+    终端协议注意: Shift+Enter 需终端发送带 shift 修饰的序列(kitty keyboard
+    protocol / CSI u)。Windows Terminal 较新版本默认支持; 若你的终端把
+    Shift+Enter 当普通 Enter, 它会退化为换行 —— 启动提示里有兜底。
+    """
+    BINDINGS = [
+        Binding("shift+enter", "submit", "发送", show=False, priority=True),
+    ]
+
+    def action_submit(self) -> None:
+        text = self.text
+        if not text.strip():
+            return
+        self.text = ""
+        app = self.app
+        if hasattr(app, "submit_dock"):
+            app.submit_dock(text)
 
 
 class ThemeCtl:
@@ -35,9 +58,18 @@ Screen { layout: vertical; }
     border: round $accent 40%;
     padding: 0 1;
 }
+#dock-row { 
+    height: 7; 
+    layout: horizontal;
+}
 #dock { 
-    height: 3; 
+    height: 100%;
+    width: 1fr;
     border: round $primary 50%;
+}
+#send { 
+    width: 6;
+    height: 100%;
 }
 #current { 
     height: auto; 
@@ -96,7 +128,9 @@ class PrismApp(App):
         yield Header(show_clock=False)
         yield Transcript(id="transcript", wrap=True, markup=True)
         yield Static(id="current")
-        yield Input(id="dock", placeholder="@agent 消息  |  /command  |  Python 代码")
+        with Horizontal(id="dock-row"):
+            yield DockInput(id="dock")
+            yield Button("发送", id="send")
 
     def on_key(self, event) -> None:
         """Esc 中断当前 agent run(不退出 prism)。"""
@@ -116,8 +150,12 @@ class PrismApp(App):
         current = self.query_one("#current", Static)
         app = self
 
+        import time
         reasoning_buf: list[str] = []
         current_buf: list[str] = []
+        _reasoning_last: list = [0.0]
+        _reasoning_flushed: list = [0]   # 已增量 flush 到 transcript 的 reasoning 字符数
+        _reasoning_label_shown: list = [False]   # 本轮思考是否已显「思考」标签(首段带, 后续续接)
 
         def update_current() -> None:
             app.call_from_thread(current.update, "".join(current_buf))
@@ -131,13 +169,44 @@ class PrismApp(App):
 
         def flush_reasoning() -> None:
             if reasoning_buf:
-                text = "".join(reasoning_buf).replace("[", "\\[")
-                app.call_from_thread(
-                    log.write, f"[blue]思考[/blue] [dim italic]{text}[/dim italic]")
+                full = "".join(reasoning_buf)
+                remaining = full[_reasoning_flushed[0]:]   # 未增量 flush 的尾段
+                if remaining.strip():
+                    text = remaining.replace("[", "\\[")
+                    first = not _reasoning_label_shown[0]
+                    prefix = "[blue]思考[/blue] [dim italic]▸ " if first else "[dim italic]    "
+                    app.call_from_thread(log.write, f"{prefix}{text}[/dim italic]")
                 reasoning_buf.clear()
+                _reasoning_flushed[0] = 0
+                _reasoning_label_shown[0] = False
 
+        _diag = {"reasoning": 0}
         def emit(event: dict) -> None:
             t = event.get("type")
+            # 临时诊断: reasoning 是否到达 emit(定位运行时'思考不显示')
+            if t == "reasoning":
+                _diag["reasoning"] += 1
+                if _diag["reasoning"] == 1:
+                    try:
+                        import time as _t
+                        with open(".prism/emit.log", "a", encoding="utf-8") as f:
+                            f.write(f"{_t.time():.1f} FIRST reasoning reached emit\n")
+                    except Exception:
+                        pass
+            elif t == "message_end":
+                try:
+                    import time as _t
+                    with open(".prism/emit.log", "a", encoding="utf-8") as f:
+                        f.write(f"{_t.time():.1f} message_end | reasoning_count={_diag['reasoning']}\n")
+                except Exception:
+                    pass
+            elif t == "error":
+                try:
+                    import time as _t
+                    with open(".prism/emit.log", "a", encoding="utf-8") as f:
+                        f.write(f"{_t.time():.1f} ERROR | {str(event.get('error',''))[:200]}\n")
+                except Exception:
+                    pass
             if t == "agent_start":
                 app._agent_busy = True
             elif t == "agent_end":
@@ -149,18 +218,32 @@ class PrismApp(App):
                 current_buf.append(event.get("delta", ""))
                 update_current()
             elif t == "message_end":
+                flush_reasoning()
                 text = "".join(current_buf)
                 if text:
                     app.call_from_thread(log.write, text)
                 current_buf.clear()
                 app.call_from_thread(current.update, "")
             elif t == "reasoning":
-                parts = event.get("text", "").split("\n")
-                for i, part in enumerate(parts):
-                    reasoning_buf.append(part)
-                    if i < len(parts) - 1:
-                        flush_reasoning()
+                reasoning_buf.append(event.get("text", ""))
+                # 流式: 时间节流(300ms)增量写 transcript; 一次思考只在首段带「思考」标签, 后续续接
+                now = time.time()
+                if now - _reasoning_last[0] > 0.3:
+                    _reasoning_last[0] = now
+                    full = "".join(reasoning_buf)
+                    new_part = full[_reasoning_flushed[0]:]
+                    first = not _reasoning_label_shown[0]
+                    _reasoning_flushed[0] = len(full)
+                    if new_part.strip():
+                        np = new_part.replace("\n", " ").replace("\r", "").replace("[", "\\[")
+                        prefix = "[blue]思考[/blue] [dim italic]▸ " if first else "[dim italic]    "
+                        _reasoning_label_shown[0] = True
+                        try:
+                            app.call_from_thread(log.write, f"{prefix}{np}[/dim italic]")
+                        except Exception:
+                            pass
             elif t == "tool_execution_start":
+                flush_reasoning()
                 name = event.get("tool_name", "?")
                 args_str = _fmt_args(event.get("args", {}))
                 app.call_from_thread(
@@ -233,22 +316,35 @@ class PrismApp(App):
             log.write("[dim]tools:[/dim] " + "  ".join(f"[cyan]{t.name}[/]" for t in default_registry.tools()))
         if self.commands:
             log.write("[dim]cmds:[/dim]   " + "  ".join(f"[cyan]/{n}[/]" for n in sorted(self.commands)))
+        log.write("[dim]输入:[/dim]  点[bold]发送[/bold]按钮(任何终端) 或 [bold]Shift+Enter[/bold](mintty) · Enter 换行 · 可粘贴长文本")
         log.write("[dim]─[/dim]" * 40)
         log.write("")
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        text = event.value
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """发送按钮(Shift+Enter 在不支持 kitty 的终端里的可靠兜底)。"""
+        if event.button.id == "send":
+            dock = self.query_one("#dock", DockInput)
+            text = dock.text
+            dock.text = ""
+            if text.strip():
+                self.submit_dock(text)
+
+    def submit_dock(self, text: str) -> None:
+        """dock 提交入口(DockInput 的 Shift+Enter 触发)。支持多行 @ 消息 / 多行 Python。
+
+        路由: /cmd(单行) / @agent 消息(可多行) / 否则当 Python exec(可多行)。
+        """
         if not text.strip():
             return
         log = self.query_one("#transcript", RichLog)
-        # 用户输入用醒目的标记
-        log.write(f"[bold green]❯[/] {text}")
-        event.input.value = ""
+        # 用户输入用醒目的标记; 多行时后续行缩进, 不破坏 transcript 结构
+        display = text.replace("\n", "\n  ") if "\n" in text else text
+        log.write(f"[bold green]❯[/] {display}")
 
         ns = self.agent.namespace
         stripped = text.strip()
 
-        # / 指令
+        # / 指令(保持单行语义)
         if stripped.startswith("/") and "\n" not in stripped:
             parts = stripped[1:].split(None, 1)
             name = parts[0] if parts else ""
@@ -277,8 +373,8 @@ class PrismApp(App):
                     log.write(f"[red]/{name}: {type(e).__name__}: {e}[/]")
             return
 
-        # @ 路由
-        if stripped.startswith("@") and "\n" not in stripped:
+        # @ 路由(允许换行: 粘贴长 prompt 不再被踢去 exec)
+        if stripped.startswith("@"):
             parts = stripped[1:].split(None, 1)
             if len(parts) < 2:
                 log.write("[red]@ 了就得说事[/]")
