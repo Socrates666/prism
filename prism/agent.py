@@ -177,6 +177,29 @@ class Agent:
                 sub(event)
             except Exception:
                 pass
+        # 认知事件广播(RLM Phase A 固定点): emit → cognitive event → cognitive_hooks
+        # 空 cognitive_hooks = no-op(逐字节现状)。这是 core 的认知自举广播点。
+        cog = self._to_cognitive_event(event)
+        if cog is not None:
+            for hook in self.cognitive_hooks:
+                try:
+                    hook.on_cognitive_event(self, cog)
+                except Exception:
+                    pass   # hook 容错, 不炸主流程(与 patch 异常降级一致)
+
+    def _to_cognitive_event(self, event: dict) -> dict | None:
+        """emit 事件 → 认知事件翻译(message_end→thought / tool→action·result)。"""
+        t = event.get("type")
+        if t == "message_end":
+            text = (event.get("text") or "").strip()
+            return {"type": "thought", "content": text} if text else None
+        if t == "tool_execution_start":
+            return {"type": "action", "name": event.get("tool_name"), "args": event.get("args")}
+        if t == "tool_execution_end":
+            return {"type": "result", "name": event.get("tool_name"),
+                    "content": str(event.get("result", ""))[:500],
+                    "is_error": event.get("is_error", False)}
+        return None
 
     def subscribe(self, listener: Callable[[dict], None]):
         """显式订阅事件流(对齐 pi session.subscribe)。返回 unsubscribe 函数。"""

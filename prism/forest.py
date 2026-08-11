@@ -142,5 +142,12 @@ class SQLiteForest(Forest):
             (self.session_id,)).fetchall()
         return [int(r["tree_id"]) for r in rows]
 
+    def nodes_in_tree(self, tree_id: int) -> list[dict]:
+        """某棵树全部节点(按时间序)。实验/观测用。"""
+        rows = self._conn.execute(
+            "SELECT * FROM nodes WHERE session_id=? AND tree_id=? ORDER BY created_at",
+            (self.session_id, tree_id)).fetchall()
+        return [dict(r) for r in rows]
+
     def close(self) -> None:
         self._conn.close()
