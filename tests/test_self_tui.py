@@ -11,13 +11,13 @@ from prism.tui.terminal import Key
 # ── markup ─────────────────────────────────────────────────────────────────
 def test_markup_bold_cyan_combo():
     segs = parse_markup("[bold cyan]x[/bold cyan]")
-    assert segs == [("x", Style(bold=True, fg=6))]
+    assert segs == [("x", Style(bold=True, fg=(0, 215, 255)))]   # cyan = pi #00d7ff
 
 
 def test_markup_stack_nesting():
     # 外层 bold, 内层 cyan → 内层片段 bold+cyan; 外层复位后仅 bold 应消失
     segs = parse_markup("[bold]a[cyan]b[/]c[/]")
-    assert segs[1] == ("b", Style(bold=True, fg=6))     # 嵌套归约
+    assert segs[1] == ("b", Style(bold=True, fg=(0, 215, 255)))     # 嵌套归约(cyan)
     assert segs[2] == ("c", Style(bold=True))           # cyan 关闭, bold 仍在
 
 
@@ -37,7 +37,7 @@ def test_markup_256_sgr():
 def test_wrap_preserves_style_across_break():
     rows = wrap_segments(parse_markup("[red]abcdefghijklmnop[/red]"), 5)
     assert len(rows) == 4
-    assert all(s == Style(fg=1) for _, s in rows[0])
+    assert all(s == Style(fg=(204, 102, 102)) for _, s in rows[0])   # red = pi #cc6666
 
 
 # ── buffer ─────────────────────────────────────────────────────────────────

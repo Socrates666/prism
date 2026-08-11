@@ -43,7 +43,7 @@ def test_markup_numeric_color():
 
 def test_markup_deep_nest():
     s = "[bold][italic][dim][cyan]" + "x" * 50 + "[/][/][/][/]"
-    assert parse_markup(s)[-1][1].fg == 6 and parse_markup(s)[-1][1].bold
+    assert parse_markup(s)[-1][1].fg == (0, 215, 255) and parse_markup(s)[-1][1].bold
 
 
 def test_markup_escape_and_literal_bracket():
@@ -80,7 +80,7 @@ def test_wrap_preserves_style_each_row():
     rows = wrap_segments(parse_markup("[red]abcdefghij[/red]"), 3)
     for row in rows:
         for _, s in row:
-            assert s.fg == 1
+            assert s.fg == (204, 102, 102)   # red = pi #cc6666
 
 
 def test_wrap_empty_segments():

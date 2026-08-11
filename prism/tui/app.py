@@ -21,24 +21,42 @@ from .terminal import Terminal
 
 
 # ── 内置主题(对齐 pi token 体系) ───────────────────────────────────────────
+def _h(s: str):
+    """hex(#rrggbb) → (r,g,b) 元组(truecolor)。"""
+    s = s.lstrip("#")
+    return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+
+
+# pi dark.json 对齐(软色 Tomorrow Night 系; bg token 存裸 RGB 元组)
 DARK = {
-    "accent": Style(fg=6), "primary": Style(fg=4),
-    "success": Style(fg=2), "error": Style(fg=1), "warning": Style(fg=3),
-    "muted": Style(dim=True), "dim": Style(dim=True), "text": Style(),
-    "thinking_text": Style(dim=True, italic=True),
-    "border_muted": Style(fg=238, dim=True), "user": Style(fg=2),
-    # pi 风格块背景(256 色索引)
-    "user_bg": 236, "tool_pending_bg": 236, "tool_success_bg": 22,
-    "tool_error_bg": 52, "thinking_bg": 235, "cognitive_bg": 237,
+    "accent": Style(fg=_h("8abeb7")), "primary": Style(fg=_h("5f87ff")),
+    "border": Style(fg=_h("5f87ff")), "border_accent": Style(fg=_h("00d7ff")),
+    "border_muted": Style(fg=_h("505050")),
+    "success": Style(fg=_h("b5bd68")), "error": Style(fg=_h("cc6666")),
+    "warning": Style(fg=_h("ffff00")), "muted": Style(fg=_h("808080")),
+    "dim": Style(fg=_h("666666")), "text": Style(fg=_h("d4d4d4")),
+    "thinking_text": Style(fg=_h("808080"), italic=True),
+    "user": Style(fg=_h("d4d4d4")), "tool_output": Style(fg=_h("808080")),
+    "custom_label": Style(fg=_h("9575cd")), "md_heading": Style(fg=_h("f0c674")),
+    "user_bg": _h("343541"), "tool_pending_bg": _h("282832"),
+    "tool_success_bg": _h("283228"), "tool_error_bg": _h("3c2828"),
+    "thinking_bg": _h("282832"), "cognitive_bg": _h("2d2838"),
+    "page_bg": _h("18181e"),
 }
 LIGHT = {
-    "accent": Style(fg=4), "primary": Style(fg=5),
-    "success": Style(fg=2), "error": Style(fg=1), "warning": Style(fg=3),
-    "muted": Style(dim=True), "dim": Style(dim=True), "text": Style(),
-    "thinking_text": Style(dim=True, italic=True),
-    "border_muted": Style(fg=250, dim=True), "user": Style(fg=2),
-    "user_bg": 254, "tool_pending_bg": 254, "tool_success_bg": 194,
-    "tool_error_bg": 217, "thinking_bg": 254, "cognitive_bg": 253,
+    "accent": Style(fg=_h("5a8080")), "primary": Style(fg=_h("547da7")),
+    "border": Style(fg=_h("547da7")), "border_accent": Style(fg=_h("547da7")),
+    "border_muted": Style(fg=_h("b0b0b0")),
+    "success": Style(fg=_h("588458")), "error": Style(fg=_h("aa5555")),
+    "warning": Style(fg=_h("9a7326")), "muted": Style(fg=_h("6c6c6c")),
+    "dim": Style(fg=_h("767676")), "text": Style(fg=_h("1f2328")),
+    "thinking_text": Style(fg=_h("6c6c6c"), italic=True),
+    "user": Style(fg=_h("1f2328")), "tool_output": Style(fg=_h("6c6c6c")),
+    "custom_label": Style(fg=_h("9575cd")), "md_heading": Style(fg=_h("9a7326")),
+    "user_bg": _h("e8e8e8"), "tool_pending_bg": _h("e8e8f0"),
+    "tool_success_bg": _h("e8f0e8"), "tool_error_bg": _h("f0e8e8"),
+    "thinking_bg": _h("e8e8f0"), "cognitive_bg": _h("ede7f6"),
+    "page_bg": _h("ffffff"),
 }
 
 

@@ -389,7 +389,7 @@ class Input(Widget):
                 # 反相该格
                 cell = buf.grid[cy][cx_screen] if cy < buf.rows and cx_screen < buf.cols else None
                 ch = cell.ch if cell and cell.ch else " "
-                buf.put(cx_screen, cy, ch, Style(fg=0, bg=37))
+                buf.put(cx_screen, cy, ch, Style(fg=(0, 0, 0), bg=(220, 220, 220)))   # 反相光标
 
 
 # ── Footer(cwd · session · model · busy) ────────────────────────────────────

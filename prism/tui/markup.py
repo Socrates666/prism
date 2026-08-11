@@ -21,34 +21,43 @@ def char_width(ch: str) -> int:
         return 0
     return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
 
-# ── 颜色名 → 256 色索引(0..255) ───────────────────────────────────────────
-# sgr() 再把索引转成 ANSI 码: <8 → 30+i, <16 → 90+(i-8), 否则 38;5;i
+# ── 颜色名 → pi dark 主题 RGB(从 pi dark.json 对齐) ─────────────────────────
+# sgr() 把 RGB 转 38;2;r;g;b(truecolor), 256 索引转 38;5;i, 基本色转 30+i
 _COLOR = {
-    "black": 0, "red": 1, "green": 2, "yellow": 3,
-    "blue": 4, "magenta": 5, "cyan": 6, "white": 7,
-    "bright_black": 8, "bright_red": 9, "bright_green": 10, "bright_yellow": 11,
-    "bright_blue": 12, "bright_magenta": 13, "bright_cyan": 14, "bright_white": 15,
-    "grey": 240, "gray": 240,
+    "black": (0, 0, 0), "red": (204, 102, 102), "green": (181, 189, 104),
+    "yellow": (255, 255, 0), "blue": (95, 135, 255), "magenta": (149, 117, 205),
+    "cyan": (0, 215, 255), "white": (212, 212, 212),
+    "accent": (138, 190, 183), "grey": (128, 128, 128), "gray": (128, 128, 128),
     "default": None,
 }
 
 _STYLE_ATTR = {"bold", "italic", "dim", "underline"}
 
 
-def _index_to_fg(idx: int) -> str:
-    if 0 <= idx < 8:
-        return str(30 + idx)
-    if 8 <= idx < 16:
-        return str(90 + idx - 8)
-    return f"38;5;{idx}"
+def _fg_code(c) -> str | None:
+    """颜色(int 索引 / RGB 元组) → ANSI fg 码。"""
+    if c is None:
+        return None
+    if isinstance(c, tuple):
+        return f"38;2;{c[0]};{c[1]};{c[2]}"     # truecolor
+    if 0 <= c < 8:
+        return str(30 + c)
+    if 8 <= c < 16:
+        return str(90 + c - 8)
+    return f"38;5;{c}"                            # 256 色
 
 
-def _index_to_bg(idx: int) -> str:
-    if 0 <= idx < 8:
-        return str(40 + idx)
-    if 8 <= idx < 16:
-        return str(100 + idx - 8)
-    return f"48;5;{idx}"
+def _bg_code(c) -> str | None:
+    f = _fg_code(c)
+    if f is None:
+        return None
+    if f.startswith("38;"):
+        return "48;" + f[3:]                      # 38;2;...→48;2;... / 38;5;...→48;5;...
+    if f.startswith("3"):
+        return "4" + f[1:]                        # 30..37 → 40..47
+    if f.startswith("9"):
+        return "10" + f[1:]                       # 90..97 → 100..107
+    return f
 
 
 @dataclass(frozen=True)
@@ -90,9 +99,9 @@ class Style:
         if self.underline:
             codes.append("4")
         if self.fg is not None:
-            codes.append(_index_to_fg(self.fg))
+            codes.append(_fg_code(self.fg))
         if self.bg is not None:
-            codes.append(_index_to_bg(self.bg))
+            codes.append(_bg_code(self.bg))
         return ";".join(codes) if codes else "0"
 
 
