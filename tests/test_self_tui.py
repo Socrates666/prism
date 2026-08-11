@@ -3,7 +3,7 @@ from prism.tui.markup import Style, parse_markup, wrap_segments, strip_markup
 from prism.tui.buffer import Buffer, render_plain, render_diff, char_width
 from prism.tui.css import parse_css
 from prism.tui.widget import layout, Widget
-from prism.tui.widgets import Header, RichLog, Static, Input, Footer
+from prism.tui.widgets import Header, RichLog, Static, Input, Footer, _BlockUnit
 from prism.tui.app import App
 from prism.tui.terminal import Key
 
@@ -169,4 +169,77 @@ def test_app_render_contains_all_regions():
     out = a.render_to_string(rows=10, cols=40)
     assert "◆ Prism" in out
     assert "❯ hi" in out
-    assert "idle" in out
+    assert "thinking" in out          # footer 第2行
+
+
+# ── pi 风格严格自测(白盒 + 黑盒) ────────────────────────────────────────────
+def test_whitebox_block_has_no_border_chars():
+    """白盒: 块渲染产物里零个边框字符(╭╮╰╯│─), pi 用纯背景色带。"""
+    log = RichLog(id="t"); log.app = _StubApp()
+    log.user("hi")
+    ref = log.tool_start("read_file", "path=x")
+    log.tool_end(ref, "ok", False)
+    log.thinking("hmm")
+    buf = Buffer(30, 12)
+    log.draw(buf, 0, 0, 30, 12)
+    plain = render_plain(buf)
+    for ch in "╭╮╰╯":
+        assert ch not in plain, f"块里不该出现边框 {ch}"
+
+
+def test_whitebox_block_fills_full_width_bg():
+    """白盒: 工具块每一行(含 padding 行)的 cell 都带 bg(全宽色带)。"""
+    log = RichLog(id="t"); log.app = _StubApp()
+    ref = log.tool_start("t", "")
+    log.tool_end(ref, "r", False)
+    success_bg = _StubApp._themes["dark"]["tool_success_bg"]
+    units = log._ensure_units(28)
+    blk = [u for u in units if isinstance(u, _BlockUnit)][0]
+    # body_rows 存在; 块的 bg 字段 == success
+    assert blk.b["bg"] == success_bg
+
+
+def test_whitebox_tool_name_inline_bold():
+    """白盒: 工具名是 body 首行的 bold 内联文本, 不是标题栏。"""
+    log = RichLog(id="t"); log.app = _StubApp()
+    log.tool_start("read_file", "path=config.py")
+    # lines 属性里首条 body 应含 bold read_file
+    assert any("read_file" in l for l in log.lines)
+    # 不存在 title 字段(pi 无标题)
+    for kind, payload in log.entries:
+        if kind == "block":
+            assert "title" not in payload
+
+
+def test_whitebox_user_block_has_no_title():
+    """白盒: 用户消息块无标题(pi user-message.js 无 title)。"""
+    log = RichLog(id="t"); log.app = _StubApp()
+    log.user("hello")
+    for kind, payload in log.entries:
+        if kind == "block":
+            assert "title" not in payload
+            assert payload["body"] == ["hello"]
+
+
+def test_blackbox_render_is_flat_bands():
+    """黑盒: 整帧渲染里, transcript 内部不出现嵌套边框框(扁平色带)。"""
+    from prism.shell import PrismApp
+    app = PrismApp(); app.run(headless=True); app._drain()
+    log = app.query_one("#transcript"); log.clear()
+    log.user("读 config.py")
+    ref = log.tool_start("read_file", "path=config.py")
+    log.tool_end(ref, "PORT=8080", False)
+    out = app.render_to_string(rows=26, cols=50)
+    # transcript 外框只有一对 ╭╮╰╯; 内部不应再出现(扁平色带)
+    assert out.count("╭") == 1 and out.count("╰") == 1
+    # 用户消息 / 工具名 / 结果都在
+    assert "读 config.py" in out
+    assert "read_file" in out
+    assert "PORT=8080" in out
+
+
+def test_blackbox_footer_two_lines():
+    """黑盒: footer 占 2 行(cwd 行 + model·thinking 行)。"""
+    log_cls = Footer
+    f = Footer(id="f"); f.app = _StubApp()
+    assert f.measure(50) == 2

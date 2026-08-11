@@ -29,24 +29,21 @@ class _LineUnit:
     """一行(已 wrap)。"""
     def __init__(self, row): self.row = row; self.height = 1
     def draw(self, buf, x, y, w):
-        buf.write_segments(x, y, self.row)
+        buf.write_segments(x + 1, y, self.row)   # 1 格左缩进(对齐 pi outputPad)
 
 
 class _BlockUnit:
-    """带背景色的 pi 风格块(用户消息/工具调用/思考/认知)。"""
+    """pi 风格块: 全宽背景色带 + 1 格留白, 零边框字符(对齐 pi-tui Box)。"""
     def __init__(self, b, body_rows):
         self.b = b; self.body_rows = body_rows
-        self.height = 2 + max(1, len(body_rows))
+        self.height = 2 + max(1, len(body_rows))   # 上下各 1 行 padding
     def draw(self, buf, x, y, w):
-        b = self.b; h = self.height
-        buf.box(x, y, w, h, title=b["title"], border_style=b["border"], title_style=b["title_style"])
-        bg = b["bg"]
+        b = self.b; h = self.height; bg = b.get("bg")
         if bg is not None:
-            buf.fill_bg(x + 1, y + 1, w - 2, h - 2, bg)
-        rows = self.body_rows or [[]]
-        for r, row in enumerate(rows):
+            buf.fill_bg(x, y, w, h, bg)            # 全宽铺背景
+        for r, row in enumerate(self.body_rows or [[]]):
             segs = [(t, s.merge(Style(bg=bg))) for t, s in row] if bg is not None else row
-            buf.write_segments(x + 2, y + 1 + r, segs)
+            buf.write_segments(x + 1, y + 1 + r, segs)   # 左留 1 格
 
 
 class RichLog(Widget):
@@ -97,55 +94,41 @@ class RichLog(Widget):
         self.entries.clear(); self._invalidate()
 
     def user(self, text: str) -> None:
+        # pi: 纯背景色带, 无标题无边框
         self.entries.append(("block", {
-            "title": " you ", "title_style": self._st("user"),
-            "border": self._st("user"), "bg": self._bg("user_bg"),
-            "body": [text],
+            "bg": self._bg("user_bg"), "body": [text],
         }))
         self._invalidate()
 
     def tool_start(self, name: str, args_str: str = "") -> dict:
-        title = f" ⚙ {name} " + (f"({args_str}) " if args_str else "")
-        b = {
-            "title": title, "title_style": self._st("accent"),
-            "border": self._st("dim"), "bg": self._bg("tool_pending_bg"),
-            "body": [""],
-        }
+        # pi: bold 工具名内联在首行(非标题栏), args dim 跟后
+        head = f"[bold]{name}[/bold]" + (f"  [dim]{args_str}[/dim]" if args_str else "")
+        b = {"name": name, "bg": self._bg("tool_pending_bg"), "body": [head]}
         self.entries.append(("block", b))
         self._invalidate()
         return b
 
     def tool_end(self, ref: dict, result: str, is_error: bool) -> None:
-        if is_error:
-            ref["title"] = ref["title"].replace("⚙", "✗", 1)
-            ref["title_style"] = self._st("error")
-            ref["border"] = self._st("error")
-            ref["bg"] = self._bg("tool_error_bg")
-            ref["body"] = [result] if result else ["(error)"]
-        else:
-            ref["title"] = ref["title"].replace("⚙", "✓", 1)
-            ref["title_style"] = self._st("success")
-            ref["border"] = self._st("success")
-            ref["bg"] = self._bg("tool_success_bg")
-            ref["body"] = [result] if result else ["(done)"]
+        # pi: 状态只靠背景色传达(绿/红), 工具名保持 bold, 结果追加在下方
+        ref["bg"] = self._bg("tool_error_bg" if is_error else "tool_success_bg")
+        head = f"[bold]{ref.get('name', '?')}[/bold]"
+        ref["body"] = [head] + ([result] if result else [])
         self._invalidate()
 
     def thinking(self, text: str) -> None:
+        # pi: 思考块, dim italic 文本 + 淡背景, 无标题
         self.entries.append(("block", {
-            "title": " thinking ", "title_style": self._st("dim"),
-            "border": self._st("border_muted"), "bg": self._bg("thinking_bg"),
-            "body": [text],
+            "bg": self._bg("thinking_bg"), "body": [f"[dim italic]{text}[/dim italic]"],
         }))
         self._invalidate()
 
     def cognitive(self, stage: str, content: str, based_on=None) -> None:
+        # pi 风格: bold 标签内联 + 内容, 背景色带, 无标题栏
         label = {"intuition": "◈ intuition", "reflect": "↺ reflect"}.get(stage, stage)
-        body = content + (f"  (based_on {based_on})" if based_on else "")
+        body = (f"[bold]{label}[/bold] {content}"
+                + (f"  [dim](based_on {based_on})[/dim]" if based_on else ""))
         self.entries.append(("block", {
-            "title": f" {label} ",
-            "title_style": self._st("warning" if stage == "reflect" else "accent"),
-            "border": self._st("border_muted"), "bg": self._bg("cognitive_bg"),
-            "body": [body],
+            "bg": self._bg("cognitive_bg"), "body": [body],
         }))
         self._invalidate()
 
@@ -163,11 +146,11 @@ class RichLog(Widget):
         if iw != self._cache_iw:
             self._cache_iw = iw
             self._units = []
-            body_iw = max(1, iw - 4)
+            body_iw = max(1, iw - 2)   # 全宽色带: 左右各 1 格留白, 无边框
             for kind, payload in self.entries:
                 if kind == "line":
                     segs = parse_markup(payload)
-                    rows = wrap_segments(segs, iw) if self.wrap else [segs]
+                    rows = wrap_segments(segs, max(1, iw - 2)) if self.wrap else [segs]
                     for row in (rows or [[]]):
                         self._units.append(_LineUnit(row))
                 else:
@@ -207,24 +190,19 @@ class RichLog(Widget):
         return 1
 
     def draw(self, buf, x, y, w, h) -> None:
-        ix, iy, iw, ih = x + 2, y + 1, max(1, w - 4), max(1, h - 2)
+        # pi 消息区无边框: 块自带全宽背景, 直接堆叠
+        iw, ih = max(1, w), max(1, h)
         self._last_ih = ih
-        buf.box(x, y, w, h, border_style=self.app.style("border_muted"))
         units = self._ensure_units(iw)
         total = len(units)
         start = self._bottom_start(ih) if self._follow else max(0, min(self._top, total))
         if self._follow:
             self._top = start
-        if start > 0:
-            buf.write(x + w - 2, y, "▲", self.app.style("dim"))
-        vis_h = sum(u.height for u in units[start:])
-        if start < total and vis_h > ih:
-            buf.write(x + w - 2, y + h - 1, "▼", self.app.style("dim"))
-        yy = iy
+        yy = y
         for u in units[start:]:
-            if yy + u.height > iy + ih:
+            if yy + u.height > y + ih:
                 break
-            u.draw(buf, ix, yy, iw)
+            u.draw(buf, x, yy, iw)
             yy += u.height
 
 
@@ -422,27 +400,19 @@ class Footer(Widget):
         super().__init__(id)
 
     def measure(self, width: int) -> int:
-        return 1
+        return 2
 
     def draw(self, buf, x, y, w, h) -> None:
-        dim = self.app.style("dim")
-        accent = self.app.style("accent")
-        sep = " · "
-        # 左: cwd
         import os
+        # 第1行: cwd(dim)
         cwd = os.path.basename(os.getcwd()) or os.getcwd()
-        left = f" {cwd}"
-        cx = buf.write_markup(x, y, f"[dim]{left}[/dim]")
-        # 中: model
+        buf.write_markup(x, y, f"[dim] {cwd}[/dim]")
+        # 第2行: 右侧 model · thinking · busy spinner
         model = getattr(self.app, "model_name", "") or ""
-        if model:
-            cx = buf.write(cx, y, sep, dim)
-            cx = buf.write_markup(cx, y, f"[accent]{model}[/accent]")
-        # 右: busy / idle
+        agent = getattr(self.app, "agent", None)
+        th = getattr(getattr(agent, "model", None), "thinking_level", None) if agent else None
+        right = f"{model} · thinking {th or 'off'}"
         if getattr(self.app, "_agent_busy", False):
             frame = self._SPIN[int(time.time() * 8) % len(self._SPIN)]
-            right = f"{frame} working "
-            buf.write_markup(x + w - len(right), y, f"[accent]{right}[/accent]")
-        else:
-            right = " ● idle "
-            buf.write_markup(x + w - len(right), y, f"[dim]{right}[/dim]")
+            right = f"{frame} {right}"
+        buf.write_markup(max(x, x + w - len(right) - 1), y + 1, f"[dim]{right}[/dim]")
