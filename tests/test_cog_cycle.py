@@ -31,7 +31,7 @@ def test_enable_cycle_injects_search_state(tmp_path):
     agent.run("继续")
 
     assert model.seen is not None
-    assert "认知树" in model.seen        # search-state 注入了
+    assert "[认知树·直觉 search-state]" in model.seen   # search-state 注入了
     assert "方法A" in model.seen
     assert "失败" in model.seen or "该换思路" in model.seen
     forest.close()
@@ -51,14 +51,15 @@ def test_enable_cycle_idempotent(tmp_path):
 
 
 def test_cycle_noop_on_empty_forest(tmp_path):
-    """空树(forest 刚建无节点)→ select_context 返空 → 不注入, 不崩。"""
+    """空树(forest 刚建无节点)→ select_context 返空 → 不注入 search-state, 不崩。
+    (意识 prompt 仍在 system_prompt, 但 search-state 注入为空)"""
     forest = SQLiteForest(tmp_path / "f.db", "s1")
     model = _RecordingModel()
     agent = Agent("t", model=model, actor=False, forest=forest)
     enable_cognitive_cycle(agent)
     agent.run("开始")
     assert model.seen is not None
-    assert "认知树" not in model.seen   # 空树不注入
+    assert "[认知树·直觉 search-state]" not in model.seen   # 空树不注入 search-state
     forest.close()
 
 
@@ -74,4 +75,17 @@ def test_cycle_records_run_cognition_to_tree(tmp_path):
     nodes = forest.nodes_in_tree(trees[0])
     # 至少有一个 thought 节点(模型说的"收到"被挂)
     assert any(n["type"] == "thought" and "收到" in n["content"] for n in nodes)
+    forest.close()
+
+
+def test_enable_cycle_adds_awareness_prompt(tmp_path):
+    """enable 后 system_prompt 含认知树自指意识(agent 知道自己有 forest + raw 怎么访问)。"""
+    forest = SQLiteForest(tmp_path / "f.db", "s1")
+    agent = Agent("Prism", model=_RecordingModel(), actor=False, forest=forest)
+    enable_cognitive_cycle(agent)
+    sp = agent.system_prompt
+    assert "认知树" in sp                       # 意识 prompt 在
+    assert "Prism.forest" in sp                 # 告诉它用 <name>.forest 访问
+    assert "based_on" in sp                     # 教它自指
+    assert "套娃" in sp or "自指递归" in sp      # 教它套娃
     forest.close()
