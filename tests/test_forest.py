@@ -123,3 +123,26 @@ def test_null_forest_degrades():
     assert nf.subtree(1) == []
     assert nf.walk(1, BASED_ON) == []
     assert nf.get(1) is None
+
+
+def test_cross_thread_access(tmp_path):
+    """跨线程访问 forest(actor 线程用 TUI 线程建的连接)—— check_same_thread=False + Lock 不炸。
+    复现截图 bug: SQLite objects created in a thread can only be used in that same thread。"""
+    import threading
+    forest = SQLiteForest(tmp_path / "f.db", "s1")
+    root = forest.add_node(category=THINKING, type="thought", content="根")  # 主线程建
+    errors = []
+
+    def worker():
+        try:
+            trees = forest.trees()                              # 另一线程读
+            nodes = forest.nodes_in_tree(trees[0])
+            forest.add_node(category=THINKING, type="thought",  # 另一线程写
+                            content="子", parent=root)
+        except Exception as e:
+            errors.append(e)
+
+    t = threading.Thread(target=worker)
+    t.start(); t.join()
+    assert not errors, f"跨线程访问出错: {errors}"
+    forest.close()
