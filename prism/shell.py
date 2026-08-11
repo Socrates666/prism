@@ -1,119 +1,57 @@
-"""prism TUI 套壳 — textual 全屏, transcript + dock 布局。
+"""prism TUI 套壳 —— 自研 textual 接口相近 TUI(零 textual/rich 依赖)。
 
-@ 路由(原则8)在 Input 处理; agent emit 跨线程到 RichLog(call_from_thread)。
+布局对齐 piagent(顶到底): Header / Messages(transcript 滚动) / Current(流式)
+/ Editor(accent 边框, Shift+Enter 多行) / Footer(cwd · model · busy)。
+
+@ 路由(原则8)在 on_input_submitted 处理; agent emit 跨线程经 call_from_thread 回主循环。
 """
 from __future__ import annotations
 
-from textual.app import App, ComposeResult
-from textual.widgets import Header, Input, RichLog, Static
-
-
-class Transcript(RichLog):
-    """transcript 显示区。can_focus=False: 点击不抢 Input 焦点。"""
-    can_focus = False
-
-
-class ThemeCtl:
-    """theme 控制器: 暴露给 agent namespace, 跨线程切主题。"""
-    def __init__(self, app: "PrismApp"):
-        self._app = app
-
-    def set(self, name: str) -> None:
-        self._app.call_from_thread(self._apply, name)
-
-    def _apply(self, name: str) -> None:
-        self._app.theme = name  # pragma: no cover
-
-    def list(self) -> list:
-        return sorted(getattr(self._app, "available_themes", {}).keys())
-
-
-CSS = """
-Screen { layout: vertical; }
-#transcript { 
-    height: 1fr; 
-    border: round $accent 40%;
-    padding: 0 1;
-}
-#dock { 
-    height: 3; 
-    border: round $primary 50%;
-}
-#current { 
-    height: auto; 
-    min-height: 1; 
-    padding: 0 1; 
-    color: $text;
-}
-#dock:focus { 
-    border: round $accent;
-}
-"""
-
-
-def _fmt_args(args: dict, max_len: int = 60) -> str:
-    """精简工具参数显示。长文本截断, 只显示 key 的摘要。"""
-    if not args:
-        return ""
-    parts = []
-    for k, v in args.items():
-        s = str(v).replace("\n", " ").strip()
-        if len(s) > max_len:
-            s = s[:max_len] + "..."
-        parts.append(f"{k}={s}")
-    return ", ".join(parts)
-
-
-def _fmt_result(result: str, max_lines: int = 3, max_chars: int = 150) -> str:
-    """精简工具结果。多行只显示前几行。"""
-    if not result:
-        return ""
-    lines = result.strip().split("\n")
-    if len(lines) > max_lines:
-        shown = lines[:max_lines]
-        shown.append(f"  ... ({len(lines) - max_lines} more lines)")
-        text = "\n".join(shown)
-    else:
-        text = "\n".join(lines)
-    if len(text) > max_chars:
-        text = text[:max_chars] + "..."
-    return text
+from .tui import App, Header, Input, RichLog, Static, Footer
 
 
 class PrismApp(App):
-    """prism 全屏 TUI(transcript + dock)。"""
+    """prism 全屏 TUI(自研引擎)。"""
 
-    CSS = CSS
+    CSS = """
+Screen { layout: vertical; }
+#transcript { height: 1fr; border: round $accent; padding: 0 1; }
+#current { height: auto; min-height: 1; padding: 0 1; }
+#dock { height: auto; min-height: 3; border: round $accent; padding: 0 1; }
+"""
     TITLE = "Prism"
 
     def __init__(self) -> None:
         super().__init__()
         self.agent = None
-        self.commands = {}
-        self._agent_busy = False  # agent 正在跑时设 True
+        self.commands: dict = {}
 
-    def compose(self) -> ComposeResult:
-        yield Header(show_clock=False)
-        yield Transcript(id="transcript", wrap=True, markup=True)
+    # ── 布局 ─────────────────────────────────────────────────────────────
+    def compose(self):
+        yield Header(id="header")
+        yield RichLog(id="transcript", wrap=True)
         yield Static(id="current")
         yield Input(id="dock", placeholder="@agent 消息  |  /command  |  Python 代码")
+        yield Footer(id="footer")
 
+    # ── 按键(Esc 中断当前 agent run, 不退出 prism) ────────────────────────
     def on_key(self, event) -> None:
-        """Esc 中断当前 agent run(不退出 prism)。"""
         if event.key == "escape" and self._agent_busy:
             if self.agent:
                 self.agent.stop()
-                log = self.query_one("#transcript", RichLog)
-                log.write("[yellow]⏹ 已中断[/yellow]")
+                log = self.query_one("#transcript")
+                if isinstance(log, RichLog):
+                    log.write("[yellow]⏹ 已中断[/yellow]")
 
+    # ── 装配 agent + emit(跨线程) ─────────────────────────────────────────
     def on_mount(self) -> None:
         from .agent import Agent
         from .model import OpenAIModel
         from .registry import default_registry, load_ext
         from .memory import FileMemory
 
-        log = self.query_one("#transcript", RichLog)
-        current = self.query_one("#current", Static)
+        log = self.query_one("#transcript")
+        current = self.query_one("#current")
         app = self
 
         reasoning_buf: list[str] = []
@@ -140,9 +78,7 @@ class PrismApp(App):
             t = event.get("type")
             if t == "agent_start":
                 app._agent_busy = True
-            elif t == "agent_end":
-                app._agent_busy = False
-            elif t == "steer_interrupt":
+            elif t in ("agent_end", "steer_interrupt"):
                 app._agent_busy = False
             if t == "message_update":
                 flush_reasoning()
@@ -164,17 +100,27 @@ class PrismApp(App):
                 name = event.get("tool_name", "?")
                 args_str = _fmt_args(event.get("args", {}))
                 app.call_from_thread(
-                    log.write, f"[dim cyan]  ▸ {name}[/dim cyan]"
+                    log.write, f"[cyan]行动[/cyan] [dim]▸ {name}[/dim]"
                     + (f"[dim]({args_str})[/dim]" if args_str else ""))
             elif t == "tool_execution_end":
                 mark = "[red]✗[/red]" if event.get("is_error") else "[green]✓[/green]"
                 result = _fmt_result(str(event.get("result", "")))
+                obs = "[red]观察[/red]" if event.get("is_error") else "[green]观察[/green]"
                 if result:
-                    # 结果另起一行缩进
-                    app.call_from_thread(
-                        log.write, f"  {mark} [dim]{result}[/dim]")
+                    app.call_from_thread(log.write, f"{obs} {mark} [dim]{result}[/dim]")
                 else:
-                    app.call_from_thread(log.write, f"  {mark}")
+                    app.call_from_thread(log.write, f"{obs} {mark}")
+            elif t == "cognitive":
+                stage = event.get("stage")
+                content = _fmt_result(str(event.get("content", ""))).replace("[", "\\[")
+                if stage == "intuition":
+                    app.call_from_thread(
+                        log.write, f"[magenta]直觉[/magenta] [dim]▸ {content}[/dim]")
+                elif stage == "reflect":
+                    bo = event.get("based_on", [])
+                    bo_str = f" [dim](based_on {bo})[/dim]" if bo else ""
+                    app.call_from_thread(
+                        log.write, f"[yellow]反思[/yellow] [dim italic]↺ {content}[/dim italic]{bo_str}")
             elif t == "error":
                 flush_current()
                 app.call_from_thread(
@@ -189,29 +135,25 @@ class PrismApp(App):
         from .commands import load_commands
         load_ext("ext", default_registry, emit=emit)
         self.commands = load_commands("ext", emit=emit)
-        # 从 ext/agents/ 恢复 agent 配置
         from .agent_registry import restore_agents
         main_agent, subs = restore_agents(self, emit)
         if main_agent:
             self.agent = main_agent
         else:
-            # fallback: 无配置文件时硬编码创建
-            from .memory import FileMemory as _FM
             self.agent = Agent("Prism", model=OpenAIModel(), kind="main",
-                               registry=default_registry, memory=_FM(".prism/memory"))
+                               registry=default_registry, memory=FileMemory(".prism/memory"))
             sections = default_registry.get_prompt("prism")
             if sections:
                 self.agent.apply_prompt(sections, "Prism", "main")
             self.agent.hooks["emit"] = emit
         self.agent.namespace["theme"] = ThemeCtl(self)
-        # 子 agent 注册到命名空间
         for sub in subs:
             self.agent.namespace[sub.name] = sub
+        self.model_name = getattr(self.agent.model, "model", "") or ""
 
-        # 欢迎信息
-        log.write("[bold cyan]╭──────────────────────────────╮[/bold cyan]")
-        log.write("[bold cyan]│[/bold cyan] [bold]Prism[/bold] — Agentic TUI  [dim]v0.1[/dim]  [bold cyan]│[/bold cyan]")
-        log.write("[bold cyan]╰──────────────────────────────╯[/bold cyan]")
+        # 欢迎信息(pi 风格: 启动头)
+        log.write("[bold cyan]◆ Prism[/bold cyan] [dim]— Agentic TUI  v0.1[/dim]")
+        log.write("")
         if default_registry.tools():
             log.write("[dim]tools:[/dim] " + "  ".join(f"[cyan]{t.name}[/]" for t in default_registry.tools()))
         if self.commands:
@@ -219,15 +161,13 @@ class PrismApp(App):
         log.write("[dim]─[/dim]" * 40)
         log.write("")
 
+    # ── 输入路由(/ · @ · Python) ──────────────────────────────────────────
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value
         if not text.strip():
             return
-        log = self.query_one("#transcript", RichLog)
-        # 用户输入用醒目的标记
+        log = self.query_one("#transcript")
         log.write(f"[bold green]❯[/] {text}")
-        event.input.value = ""
-
         ns = self.agent.namespace
         stripped = text.strip()
 
@@ -269,7 +209,6 @@ class PrismApp(App):
             name, msg = parts
             target = ns.get(name)
             if target is not None and hasattr(target, "inject"):
-                # 如果目标正在跑, steer 插队; 否则正常 followUp
                 kind = "steer" if getattr(target, "_thread", None) and target.inbox.qsize() > 0 else "followUp"
                 target.inject({"type": "run", "input": msg}, kind=kind)
                 if kind == "steer":
@@ -288,7 +227,6 @@ class PrismApp(App):
                 log.write(line)  # pragma: no cover
 
     def _builtin_command(self, name: str):
-        """第一公民内置指令。"""
         from .guard import revert_latest, list_backups
         if name == "revert":
             def _r(args):
@@ -306,28 +244,23 @@ class PrismApp(App):
         return None
 
     def make_subagent_emit(self, name: str):
-        """给子 agent 的 emit: 事件汇入主 transcript, 带标签前缀。"""
-        log = self.query_one("#transcript", RichLog)
+        """给子 agent 的 emit: 事件汇入主 transcript, 带 [name] 标签。"""
+        log = self.query_one("#transcript")
         app = self
         buf: list[str] = []
 
         def flush() -> None:
             if buf:
-                app.call_from_thread(
-                    log.write, f"[dim blue]┌[{name}][/dim blue]")
-                app.call_from_thread(
-                    log.write, "".join(buf))
-                app.call_from_thread(
-                    log.write, f"[dim blue]└[/dim blue]")
+                app.call_from_thread(log.write, f"[dim blue]┌[{name}][/dim blue]")
+                app.call_from_thread(log.write, "".join(buf))
+                app.call_from_thread(log.write, f"[dim blue]└[/dim blue]")
                 buf.clear()
 
         def emit(event: dict) -> None:
             t = event.get("type")
             if t == "agent_start":
                 app._agent_busy = True
-            elif t == "agent_end":
-                app._agent_busy = False
-            elif t == "steer_interrupt":
+            elif t in ("agent_end", "steer_interrupt"):
                 app._agent_busy = False
             if t == "message_update":
                 buf.append(event.get("delta", ""))
@@ -339,18 +272,74 @@ class PrismApp(App):
                 args_str = _fmt_args(event.get("args", {}))
                 app.call_from_thread(
                     log.write,
-                    f"[dim blue]│[{name}][/dim blue] [dim cyan]▸ {tool}[/dim cyan]"
+                    f"[dim blue]│[{name}][/dim blue] [cyan]行动[/cyan] [dim]▸ {tool}[/dim]"
                     + (f"[dim]({args_str})[/dim]" if args_str else ""))
             elif t == "tool_execution_end":
                 mark = "[red]✗[/red]" if event.get("is_error") else "[green]✓[/green]"
                 result = _fmt_result(str(event.get("result", "")))
+                obs = "[red]观察[/red]" if event.get("is_error") else "[green]观察[/green]"
                 app.call_from_thread(
-                    log.write, f"[dim blue]│[{name}][/dim blue] {mark} [dim]{result}[/dim]")
+                    log.write, f"[dim blue]│[{name}][/dim blue] {obs} {mark} [dim]{result}[/dim]")
+            elif t == "cognitive":
+                stage = event.get("stage")
+                content = _fmt_result(str(event.get("content", ""))).replace("[", "\\[")
+                if stage == "intuition":
+                    app.call_from_thread(
+                        log.write, f"[dim blue]│[{name}][/dim blue] [magenta]直觉[/magenta] [dim]▸ {content}[/dim]")
+                elif stage == "reflect":
+                    bo = event.get("based_on", [])
+                    bo_str = f" [dim](based_on {bo})[/dim]" if bo else ""
+                    app.call_from_thread(
+                        log.write, f"[dim blue]│[{name}][/dim blue] [yellow]反思[/yellow] [dim italic]↺ {content}[/dim italic]{bo_str}")
             elif t == "error":
                 flush()
                 app.call_from_thread(
                     log.write, f"[dim blue]│[{name}][/dim blue] [red]error: {event.get('error')}[/red]")
         return emit
+
+
+class ThemeCtl:
+    """theme 控制器: 暴露给 agent namespace, 跨线程切主题。"""
+    def __init__(self, app: "PrismApp"):
+        self._app = app
+
+    def set(self, name: str) -> None:
+        self._app.call_from_thread(self._apply, name)
+
+    def _apply(self, name: str) -> None:
+        if name in self._app.available_themes:
+            self._app.theme = name
+            self._app.request_render()
+
+    def list(self) -> list:
+        return sorted(getattr(self._app, "available_themes", {}).keys())
+
+
+def _fmt_args(args: dict, max_len: int = 60) -> str:
+    if not args:
+        return ""
+    parts = []
+    for k, v in args.items():
+        s = str(v).replace("\n", " ").strip()
+        if len(s) > max_len:
+            s = s[:max_len] + "..."
+        parts.append(f"{k}={s}")
+    return ", ".join(parts)
+
+
+def _fmt_result(result: str, max_lines: int = 3, max_chars: int = 150) -> str:
+    if not result:
+        return ""
+    lines = result.strip().split("\n")
+    if len(lines) > max_lines:
+        shown = lines[:max_lines]
+        shown.append(f"  ... ({len(lines) - max_lines} more lines)")
+        text = "\n".join(shown)
+    else:
+        text = "\n".join(lines)
+    if len(text) > max_chars:
+        text = text[:max_chars] + "..."
+    return text
 
 
 def main() -> None:

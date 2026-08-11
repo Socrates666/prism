@@ -1,60 +1,77 @@
-"""黑盒 TUI: PrismApp Pilot 验证结构/焦点/不崩(不调 LLM)。
+"""黑盒 TUI: PrismApp 自研引擎 headless 验证结构/焦点/路由(不调 LLM)。
 
-RichLog 内容不可读回, 故断言 widget 状态/焦点/app 存活, 不断言渲染文本。
+自研引擎 transcript 内容可读回(self.lines), 故可断言渲染文本。
 """
-import asyncio
-from textual.widgets import Input
+import time
 from prism.shell import PrismApp
+from prism.tui.widgets import Input
+from prism.tui.terminal import Key
 
 
+def mount() -> PrismApp:
+    app = PrismApp()
+    app.run(headless=True)          # 装配 + on_mount, 不进终端
+    return app
+
+
+def submit(app: PrismApp, value: str):
+    dock = app.query_one("#dock")
+    dock.value = value
+    dock.pos = len(value)
+    dock.on_key(Key(key="enter", char=""))     # 走 Input 提交路径(提交后自清, 与真实键入一致)
+    app._drain()
+    return app.query_one("#transcript")
+
+
+def press(app: PrismApp, *keys: str) -> None:
+    for k in keys:
+        key = Key(key=k, char=k) if len(k) == 1 else Key(key=k, char="")
+        app._dispatch_key(key)
+    app._drain()
+
+
+def lines(app: PrismApp) -> list[str]:
+    return app.query_one("#transcript").lines
+
+
+# ── 结构 ──────────────────────────────────────────────────────────────────
 def test_tui_mounts_main_agent_and_widgets():
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            app = pilot.app
-            assert app.agent is not None
-            assert app.agent.kind == "main"
-            assert app.query_one("#transcript") is not None
-            assert app.query_one("#dock") is not None
-    asyncio.run(run())
+    app = mount()
+    assert app.agent is not None
+    assert app.agent.kind == "main"
+    assert app.query_one("#transcript") is not None
+    assert app.query_one("#dock") is not None
+    assert app.query_one("#footer") is not None       # pi 风格四段式
 
 
-def test_tui_focus_survives_transcript_click():
-    """阶段 E 修复回归: 点击 transcript 不抢 Input 焦点。"""
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            dock = pilot.app.query_one("#dock", Input)
-            assert dock.has_focus
-            await pilot.click("#transcript")
-            await pilot.pause()
-            assert dock.has_focus                         # 焦点没被抢
-            await pilot.press("a", "b", "c")
-            await pilot.pause()
-            assert dock.value == "abc"                    # 键盘仍进 Input
-    asyncio.run(run())
+def test_tui_input_focused_by_default():
+    """编辑器默认聚焦; 键盘始终进 Input(transcript 不抢焦点)。"""
+    app = mount()
+    dock = app.query_one("#dock")
+    assert app._focusable[app._focus_idx] is dock
+    press(app, "a", "b", "c")
+    assert dock.value == "abc"
 
 
 def test_tui_at_route_unknown_agent_no_crash():
     """@未知 agent → 报错写 transcript, 但 app 不崩。"""
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            dock = pilot.app.query_one("#dock", Input)
-            dock.value = "@ghost hello"
-            await pilot.press("enter")
-            await pilot.pause()
-            assert pilot.app.is_running                    # 没崩
-            assert dock.value == ""                        # 提交后清空
-    asyncio.run(run())
+    app = mount()
+    log = submit(app, "@ghost hello")
+    assert any("ghost" in l for l in log.lines)
+    assert app.query_one("#dock").value == ""         # 提交后清空
 
 
 def test_tui_empty_at_message_no_crash():
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            dock = pilot.app.query_one("#dock", Input)
-            dock.value = "@Prism"                           # 空消息
-            await pilot.press("enter")
-            await pilot.pause()
-            assert pilot.app.is_running
-    asyncio.run(run())
+    app = mount()
+    log = submit(app, "@Prism")
+    assert any("@ 了就得说事" in l for l in log.lines)
+
+
+def test_tui_empty_input_noop():
+    app = mount()
+    before = len(lines(app))
+    submit(app, "   ")
+    assert len(lines(app)) == before              # 空输入不 echo, transcript 不增长
 
 
 class FakeModel:
@@ -65,46 +82,42 @@ class FakeModel:
         yield {"type": "done", "tool_calls": tcs or []}
 
 
-def test_tui_slash_model_switches():                          # /model 触发 + 状态变
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            dock = pilot.app.query_one("#dock", Input)
-            dock.value = "/model glm-4.7"
-            await pilot.press("enter"); await pilot.pause()
-            assert pilot.app.agent.model.model == "glm-4.7"
-    asyncio.run(run())
+def test_tui_slash_model_switches():
+    app = mount()
+    submit(app, "/model glm-4.7")
+    assert app.agent.model.model == "glm-4.7"
 
 
-def test_tui_slash_thinking_off():                            # /thinking off 触发
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            dock = pilot.app.query_one("#dock", Input)
-            dock.value = "/thinking off"
-            await pilot.press("enter"); await pilot.pause()
-            assert pilot.app.agent.thinking_level == "off"
-    asyncio.run(run())
+def test_tui_slash_thinking_off():
+    app = mount()
+    submit(app, "/thinking off")
+    assert app.agent.thinking_level == "off"
 
 
-def test_tui_python_exec_sets_namespace():                    # Python 输入→exec→namespace
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            dock = pilot.app.query_one("#dock", Input)
-            dock.value = "x = 42"
-            await pilot.press("enter"); await pilot.pause()
-            assert pilot.app.agent.namespace.get("x") == 42
-    asyncio.run(run())
+def test_tui_python_exec_sets_namespace():
+    app = mount()
+    submit(app, "x = 42")
+    assert app.agent.namespace.get("x") == 42
 
 
-def test_tui_at_prism_runs_with_fake_model():                # @Prism→inject→actor 跑(fake model)
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            app = pilot.app
-            app.agent.model = FakeModel([("prism-reply", [])])   # 避免真 LLM
-            dock = app.query_one("#dock", Input)
-            dock.value = "@Prism hi"
-            await pilot.press("enter")
-            for _ in range(50):
-                await pilot.pause(0.05)
-                if app.agent.last_result: break
-            assert app.agent.last_result == "prism-reply"
-    asyncio.run(run())
+def test_tui_python_exec_error_shown():
+    app = mount()
+    log = submit(app, "1/0")
+    assert any("ZeroDivisionError" in l for l in log.lines)
+
+
+def test_tui_slash_unknown_command():
+    app = mount()
+    log = submit(app, "/nope")
+    assert any("未知指令" in l for l in log.lines)
+
+
+def test_tui_at_prism_runs_with_fake_model():
+    app = mount()
+    app.agent.model = FakeModel([("prism-reply", [])])
+    submit(app, "@Prism hi")
+    for _ in range(100):
+        time.sleep(0.05)
+        if app.agent.last_result:
+            break
+    assert app.agent.last_result == "prism-reply"
