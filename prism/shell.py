@@ -151,7 +151,7 @@ Screen { layout: vertical; }
         _S = ["████ ","█    ","███  ","   █ ","████ "]
         _M = ["█   █","██ ██","█ █ █","█   █","█   █"]
         _letters = [_P, _R, _I, _S, _M]
-        _spectrum = ["#ff5f5f", "#f0c674", "#b5bd68", "#56b6c2", "#c678dd"]
+        _spectrum = ["#ff1744", "#ffd000", "#00ff7b", "#00d4ff", "#c850ff"]   # 鲜艳分光(满饱和)
         log.write("")
         for _r in range(5):
             log.write(f"[{_spectrum[_r]}]" + " ".join(_L[_r] for _L in _letters) + "[/]")
