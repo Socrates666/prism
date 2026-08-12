@@ -144,14 +144,17 @@ Screen { layout: vertical; }
             self.agent.namespace[sub.name] = sub
         self.model_name = getattr(self.agent.model, "model", "") or ""
 
-        # 欢迎信息(pi 风格: 启动头)
-        log.write("[bold cyan]◆ Prism[/bold cyan] [dim]— Agentic TUI  v0.1[/dim]")
+        # 启动 ASCII 艺术(棱镜分光, 每行一色)—— 不打印 banner/tools/cmds
+        _P = ["█████","█   █","█████","█    ","█    "]
+        _R = ["████ ","█   █","████ ","█  █ ","█   █"]
+        _I = ["█████","  █  ","  █  ","  █  ","█████"]
+        _S = ["████ ","█    ","███  ","   █ ","████ "]
+        _M = ["█   █","██ ██","█ █ █","█   █","█   █"]
+        _letters = [_P, _R, _I, _S, _M]
+        _spectrum = ["#ff5f5f", "#f0c674", "#b5bd68", "#56b6c2", "#c678dd"]
         log.write("")
-        if default_registry.tools():
-            log.write("[dim]tools:[/dim] " + "  ".join(f"[cyan]{t.name}[/]" for t in default_registry.tools()))
-        if self.commands:
-            log.write("[dim]cmds:[/dim]   " + "  ".join(f"[cyan]/{n}[/]" for n in sorted(self.commands)))
-        log.write("[dim]─[/dim]" * 40)
+        for _r in range(5):
+            log.write(f"[{_spectrum[_r]}]" + " ".join(_L[_r] for _L in _letters) + "[/]")
         log.write("")
 
     # ── 输入路由(/ · @ · Python) ──────────────────────────────────────────

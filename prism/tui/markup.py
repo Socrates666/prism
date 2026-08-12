@@ -117,6 +117,9 @@ def _parse_tag(body: str) -> Style:
             v = _COLOR[p]
             if v is not None:
                 delta = replace(delta, fg=v)
+        elif p.startswith("#") and len(p) == 7:
+            h = p[1:]
+            delta = replace(delta, fg=(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)))
         elif p.isdigit():
             delta = replace(delta, fg=int(p))
         # 未知属性忽略(宽容)
