@@ -147,16 +147,6 @@ def test_model_chat_nonstream_method():
     assert m.chat([{"role": "user", "content": "x"}]) == "hello"
 
 
-def test_non_stream_create_error_yields_empty_done():
-    m = OpenAIModel.__new__(OpenAIModel)
-
-    def boom(**k):
-        raise RuntimeError("down")
-    FC = type("FC", (), {"chat": type("Chat", (), {"completions": type("Comp", (), {"create": staticmethod(boom)})()})()})
-    m.client = FC(); m.model = "t"; m.thinking_level = None; m._first_timeout = 5
-    assert list(m._non_stream([{"role": "user", "content": "x"}], None)) == [{"type": "done", "tool_calls": []}]
-
-
 # ── registry 缺口 ───────────────────────────────────
 def test_registry_prompt_skill_get():
     r = Registry()

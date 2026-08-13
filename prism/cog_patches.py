@@ -31,14 +31,18 @@ def _cognitive_awareness_prompt(name: str) -> str:
 (节点: thinking=thought/action/reflection/pattern, context=result/observation。边: causes=搜索链, based_on=自指链, produces=产出。)"""
 
 
-def enable_cognitive_cycle(agent, *, max_thoughts: int = 5):
+def enable_cognitive_cycle(agent, *, max_thoughts: int = 5, intuition_model=None):
     """给 agent 装认知层 + 自指意识。返回 agent(链式)。幂等。"""
     if getattr(agent, "_cog_cycle_enabled", False):
         return agent
     # 1. 自动挂树(L0→L1)
     agent.cognitive_hooks.append(AutoAttachHook())
-    # 2. 启发式直觉(C 阶段换小模型: agent.intuition = SmallModelIntuition(...))
-    agent.intuition = HeuristicIntuition(agent.forest, max_thoughts=max_thoughts)
+    # 2. 直觉: 传 intuition_model → 小模型拼 search-state(Phase C); 否则启发式(baseline/降级)
+    if intuition_model is not None:
+        from .cog_intuition import SmallModelIntuition
+        agent.intuition = SmallModelIntuition(agent.forest, intuition_model, max_nodes=max_thoughts)
+    else:
+        agent.intuition = HeuristicIntuition(agent.forest, max_thoughts=max_thoughts)
     # 3. 直觉 stage: build_messages before —— 树接管历史 + 注入 search-state
     def inject_search_state(ctx, _agent=agent):
         extra = _agent.intuition.select_context(_agent, ctx)

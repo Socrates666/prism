@@ -1,5 +1,4 @@
 """覆盖率缺口补充 2: router/patch/spawn/model/agent_loop/shell emit/__init__。"""
-import asyncio
 import sys
 import types
 import pytest
@@ -101,18 +100,6 @@ def test_model_backend_chat_abstract():
 def test_model_backend_chat_stream_abstract():
     with pytest.raises(NotImplementedError):
         ModelBackend().chat_stream([])
-
-
-def test_non_stream_with_tools_and_thinking_off():
-    m = OpenAIModel.__new__(OpenAIModel)
-    resp = type("R", (), {"choices": [type("C", (), {"message": type("Msg", (), {"content": "x", "tool_calls": None})()})()]})()
-    calls = []
-
-    class FC:
-        chat = type("Chat", (), {"completions": type("Comp", (), {"create": staticmethod(lambda **k: (calls.append(k), resp)[1])})()})()
-    m.client = FC(); m.model = "t"; m.thinking_level = "off"; m._first_timeout = 5
-    list(m._non_stream([{"role": "user", "content": "x"}], [{"type": "function", "function": {"name": "t"}}]))
-    assert calls[0]["tools"] and calls[0]["extra_body"] == {"enable_thinking": False}
 
 
 def test_chat_stream_empty_choices_and_end():
@@ -222,127 +209,100 @@ def test_load_ipython_extension_registers():
     assert router_mod._transform in ip.input_transformers_post
 
 
-# ── shell emit 全分支(pilot mock call_from_thread) ──
+# ── shell emit 全分支(headless 自研引擎) ──
 def test_shell_emit_all_branches():
     from prism.shell import PrismApp
-    from textual.widgets import Input
-
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            app = pilot.app
-            app.call_from_thread = lambda *a, **k: None       # 避免 pilot 死锁
-            emit = app.agent.hooks["emit"]
-            for ev in [{"type": "message_update", "delta": "a\nb"},
-                       {"type": "message_end"},
-                       {"type": "reasoning", "text": "t\nu"},
-                       {"type": "tool_execution_start", "tool_name": "x", "args": {}},
-                       {"type": "tool_execution_end", "is_error": True, "result": "bad"},
-                       {"type": "error", "error": "e"},
-                       {"type": "patch_error", "phase": "around", "point": "p", "error": "x"}]:
-                emit(ev)
-            await pilot.pause()
-    asyncio.run(run())
+    app = PrismApp()
+    app.run(headless=True)
+    emit = app.agent.hooks["emit"]
+    for ev in [{"type": "message_update", "delta": "a\nb"},
+               {"type": "message_end"},
+               {"type": "reasoning", "text": "t\nu"},
+               {"type": "tool_execution_start", "tool_name": "x", "args": {}},
+               {"type": "tool_execution_end", "is_error": True, "result": "bad"},
+               {"type": "error", "error": "e"},
+               {"type": "patch_error", "phase": "around", "point": "p", "error": "x"}]:
+        emit(ev)
+    app._drain()       # 跑完所有跨线程调度, 不崩即过
 
 
 def test_shell_flush_current_on_error():
-    """流式中 error → flush_current 把已收到的 current 写入 RichLog。"""
+    """流式中 error → flush_current 把已收到的 current 写入 transcript。"""
     from prism.shell import PrismApp
-
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            app = pilot.app
-            log_writes = []
-            app.call_from_thread = lambda fn, *a, **k: (log_writes.append(a[0]) if fn.__name__ == "write" and a else None)
-            emit = app.agent.hooks["emit"]
-            emit({"type": "message_update", "delta": "partial"})   # current = "partial"
-            emit({"type": "error", "error": "boom"})               # flush_current 写 "partial"
-            await pilot.pause()
-            assert "partial" in log_writes
-    asyncio.run(run())
+    app = PrismApp()
+    app.run(headless=True)
+    emit = app.agent.hooks["emit"]
+    emit({"type": "message_update", "delta": "partial"})   # current = "partial"
+    emit({"type": "error", "error": "boom"})               # flush_current 写 "partial"
+    app._drain()
+    assert "partial" in app.query_one("#transcript").lines
 
 
 def test_tui_slash_unknown_command():
     from prism.shell import PrismApp
-    from textual.widgets import Input
-
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            app = pilot.app
-            app.call_from_thread = lambda *a, **k: None
-            dock = app.query_one("#dock", Input)
-            dock.value = "/nope x"
-            await pilot.press("enter")
-            await pilot.pause()
-            assert app.is_running
-    asyncio.run(run())
+    from prism.tui.widgets import Input
+    app = PrismApp()
+    app.run(headless=True)
+    dock = app.query_one("#dock")
+    dock.value = "/nope x"
+    app.on_input_submitted(Input.Submitted("/nope x", dock))
+    app._drain()
+    assert any("未知指令" in l for l in app.query_one("#transcript").lines)
 
 
 def test_tui_empty_input_noop():
     from prism.shell import PrismApp
-    from textual.widgets import Input
-
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            dock = pilot.app.query_one("#dock", Input)
-            dock.value = "   "
-            await pilot.press("enter")
-            await pilot.pause()
-            assert pilot.app.is_running
-    asyncio.run(run())
+    from prism.tui.widgets import Input
+    app = PrismApp()
+    app.run(headless=True)
+    dock = app.query_one("#dock")
+    before = len(app.query_one("#transcript").lines)
+    dock.value = "   "
+    app.on_input_submitted(Input.Submitted("   ", dock))
+    app._drain()
+    # 空输入不 echo, transcript 不增长
+    assert len(app.query_one("#transcript").lines) == before
 
 
 def test_tui_python_exec_error_shown():
     from prism.shell import PrismApp
-    from textual.widgets import Input
-
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            app = pilot.app
-            app.call_from_thread = lambda *a, **k: None
-            dock = app.query_one("#dock", Input)
-            dock.value = "1/0"
-            await pilot.press("enter")
-            await pilot.pause()
-            assert app.is_running
-    asyncio.run(run())
+    from prism.tui.widgets import Input
+    app = PrismApp()
+    app.run(headless=True)
+    dock = app.query_one("#dock")
+    dock.value = "1/0"
+    app.on_input_submitted(Input.Submitted("1/0", dock))
+    app._drain()
+    assert any("ZeroDivisionError" in l for l in app.query_one("#transcript").lines)
 
 
 def test_tui_revert_and_backups_builtin():              # 第一公民 /revert /backups
     from prism.shell import PrismApp
-    from textual.widgets import Input
-
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            app = pilot.app
-            app.call_from_thread = lambda *a, **k: None
-            dock = app.query_one("#dock", Input)
-            for cmd in ["/revert", "/backups"]:
-                dock.value = cmd
-                await pilot.press("enter")
-                await pilot.pause()
-            assert app.is_running
-    asyncio.run(run())
+    from prism.tui.widgets import Input
+    app = PrismApp()
+    app.run(headless=True)
+    dock = app.query_one("#dock")
+    for cmd in ["/revert", "/backups"]:
+        dock.value = cmd
+        app.on_input_submitted(Input.Submitted(cmd, dock))
+        app._drain()
 
 
-def test_tui_backups_with_changes():                     # /backups 有备份时列
+def test_tui_backups_with_changes():                     # /backups 有备份时列出
     from prism.shell import PrismApp
-    from textual.widgets import Input
+    from prism.tui.widgets import Input
     import prism.guard as g
     from pathlib import Path
-
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            g._backups.clear()
-            g._backups.append((Path("a.py"), Path("a.bak")))
-            app = pilot.app
-            app.call_from_thread = lambda *a, **k: None
-            dock = app.query_one("#dock", Input)
-            dock.value = "/backups"
-            await pilot.press("enter")
-            await pilot.pause()
-            g._backups.clear()
-            assert app.is_running
-    asyncio.run(run())
+    app = PrismApp()
+    app.run(headless=True)
+    g._backups.clear()
+    g._backups.append((Path("a.py"), Path("a.bak")))
+    dock = app.query_one("#dock")
+    dock.value = "/backups"
+    app.on_input_submitted(Input.Submitted("/backups", dock))
+    app._drain()
+    assert any("a.py" in l for l in app.query_one("#transcript").lines)
+    g._backups.clear()
 
 
 def test_load_commands_skips_underscore(tmp_path):

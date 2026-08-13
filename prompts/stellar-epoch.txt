@@ -1,0 +1,56 @@
+@Prism 现在就用 python 工具做单文件回合制 4X 太空策略游戏「星界纪元」(Stellar Epoch, 内联 CSS+JS 零依赖), 保存到 epoch/index.html。超大型任务, 预期 30+ 轮, 分 8 阶段, 必须用 3 个子 agent 分工。
+
+【执行纪律 · 撑住两小时的关键】
+1. 第一个动作必须是 python 工具, 不要先说计划。
+2. **分 8 阶段(见下), 每阶段做完自检→修 bug→数值平衡→再进下一阶段**, 不要跳过平衡硬赶。
+3. 每一轮必须以 python 工具调用结束。禁止"我将…/接下来…"结尾, 也不要中途问我要不要继续——做完一阶段立即进下一阶段。
+4. 自检用 python(node 跑纯函数 + 读文件验证), 不是文字描述。
+5. 撞墙(连续失败/无进展)时调一次 reflect 工具记下"卡在哪、换什么思路", 再继续——别闷头改。
+6. 只有 8 阶段全过、7 个纯函数全绿、能跑完整一局, 才用文字报告完成。
+
+【★ 子 agent 协作 · 3 个并发(本次重点验证)】
+```
+from prism.spawn import spawn
+sysd = spawn("systems-designer", Prism.model, parent=Prism)   # 经济+科技
+cbd  = spawn("combat-designer", Prism.model, parent=Prism)     # 飞船+战斗
+aid  = spawn("ai-designer", Prism.model, parent=Prism)         # AI 决策
+sysd.inject({"type":"run","input":"你是 systems-designer。用 write 写 systems.js: window.testPlanetYield(planet_type, buildings, pop)→{minerals,energy,food,science,credits}; window.testTechPrereq(tech, researched_set)→bool(前置满否)。规格: 5 种星球(岩石/气态/海洋/火山/冰), 各资源产出基数不同; 建筑(矿场/电厂/农场/实验室/市场)加成; 人口按食物增长。科技树 4 分支(军工/工业/社会/超空间)每支 6 科技有前置依赖。写完报路径。"})
+cbd.inject({"type":"run","input":"你是 combat-designer。用 write 写 combat.js: window.testShipDesign(components)→{cost,hp,shield,damage,range,speed}; window.testCombat(fleetA, fleetB)→{winner, lossesA, lossesB}。飞船=船体(小/中/大)+武器(激光/导弹/粒子)+装甲+护盾+引擎; 战斗回合制(射程/护盾抵消/伤害结算/可撤退)。写完报路径。"})
+aid.inject({"type":"run","input":"你是 ai-designer。用 write 写 ai.js: window.testAIDecision(civ_state, world_state)→[action, ...]。AI 文明每回合决策: 扩张(殖民空闲星球)/科研(选科技)/建军(造飞船)/外交(宣战/求和/贸易)。基于 civ 的资源/军事/关系打分选行动。写完报路径。"})
+import time
+while not (sysd.last_result and cbd.last_result and aid.last_result): time.sleep(2)
+# 读三个 workspace 的产出内联集成
+```
+三个子 agent 并发跑, 都完成再集成。任一失败用 python 调试并报告。
+
+【游戏 · 星界纪元(回合制 4X 太空策略)】
+- **地图**: 20×20 星系网格, 程序生成 ~40 星球(5 种类型, 各带资源禀赋), 航道连接相邻星球。window.testMapGen(seed)→{grid, planets, lanes}。
+- **玩家文明**: 起始首都星球, 殖民扩张, 每回合操作。
+- **经济**: 每星球按类型+建筑+人口产出(矿物/能源/食物/科研/信用)。建设队列(矿场/电厂/农场/实验室/市场/船坞/居住区)。人口按食物/住房增长, 拥挤降心情。
+- **科技树**: 4 分支(军工/工业/社会/超空间), 每支 6 科技有前置; 每回合科研积累, 解锁单位/建筑/能力(如超空间→远距离跳跃)。
+- **军事**: 飞船设计(船体+武器+装甲+护盾+引擎, 用 combat-designer 的); 舰队编成/移动/战斗(回合制战术)。船坞造船。
+- **外交**: 3 个 AI 文明, 关系(战争/中立/和平/同盟), 可签贸易/互不侵犯/同盟; 宣战/求和。
+- **胜利**(4 种): 征服(灭所有文明)/科技(研究终极科技"星界飞升")/经济(积累 10000 信用)/外交(同盟所有存活文明)。window.testVictory(world)→胜利类型 or null。
+- **AI**: 每回合 AI 文明决策(用 ai-designer 的), 不同 AI 性格(好战/扩张/科研/贸易)。
+- **UI**: 星图(网格+星球+舰队) + 顶部资源条(5 资源+回合+人口) + 星球面板(选中星球的建设/人口) + 科技树面板 + 舰队面板(设计/编队) + 外交面板 + 事件日志(最近 8 条) + 回合结束按钮。暗色太空主题。
+
+【分 8 阶段(每阶段自检+平衡再下一阶段)】
+1. 地图生成(testMapGen)+回合循环骨架+星图渲染
+2. 经济(用 systems.js 的 testPlanetYield)+建设队列+资源条
+3. 科技树(用 systems.js 的 testTechPrereq)+科研面板
+4. 飞船设计+舰队+船坞(用 combat.js 的 testShipDesign)
+5. 战斗系统(用 combat.js 的 testCombat)+战术面板
+6. AI 文明决策(用 ai.js 的 testAIDecision)+自动回合
+7. 外交+4 种胜利条件+胜利判定
+8. 总自检+数值平衡(跑 3 局: 征服/科技/经济各一, 调到不崩、不太容易也不太难)+reflect 总结
+
+【可测性 · 7 个纯函数】
+  window.testMapGen / testPlanetYield / testTechPrereq / testShipDesign / testCombat / testAIDecision / testVictory
+  (前 5 个来自子 agent, 后 2 个主 agent 写)
+
+【完成判据】
+1. 3 个子 agent 全 spawn+inject+读结果+集成 通(TUI 看到它们干活)
+2. epoch/index.html 能跑完整一局(扩张→科研→建军→战斗→外交→胜利), 4 种胜利都可达
+3. 7 个纯函数全对(node 验)
+4. 跑 3 局不崩, 数值平衡说得过去(纯反思日志: 哪条胜利线太容易/太难, 调了什么)
+全做完文字报告 + reflect 总结"这次超大型任务里, 认知树/直觉/反思哪里帮上忙、哪里没用上"。

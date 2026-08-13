@@ -1,5 +1,4 @@
 """阶段12 运行时接通测试: theme 口子 + 子 agent emit + /spawn。"""
-import asyncio
 from prism.shell import PrismApp, ThemeCtl
 from prism.commands import load_commands
 
@@ -23,27 +22,24 @@ def test_themectl_list_sorted():
 
 
 def test_tui_theme_in_namespace():
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            ns = pilot.app.agent.namespace
-            assert "theme" in ns and isinstance(ns["theme"], ThemeCtl)
-    asyncio.run(run())
+    app = PrismApp()
+    app.run(headless=True)
+    ns = app.agent.namespace
+    assert "theme" in ns and isinstance(ns["theme"], ThemeCtl)
 
 
 def test_make_subagent_emit_callable_and_safe():
-    async def run():
-        async with PrismApp().run_test() as pilot:
-            pilot.app.call_from_thread = lambda *a, **k: None   # mock: 不真跨线程(避免 pilot 死锁)
-            emit = pilot.app.make_subagent_emit("bob")
-            assert callable(emit)
-            for ev in [{"type": "message_update", "delta": "hi"},
-                       {"type": "message_end"},
-                       {"type": "tool_execution_start", "tool_name": "x"},
-                       {"type": "tool_execution_end", "is_error": False, "result": "ok"},
-                       {"type": "error", "error": "boom"}]:
-                emit(ev)
-            await pilot.pause()
-    asyncio.run(run())
+    app = PrismApp()
+    app.run(headless=True)
+    emit = app.make_subagent_emit("bob")
+    assert callable(emit)
+    for ev in [{"type": "message_update", "delta": "hi"},
+               {"type": "message_end"},
+               {"type": "tool_execution_start", "tool_name": "x"},
+               {"type": "tool_execution_end", "is_error": False, "result": "ok"},
+               {"type": "error", "error": "boom"}]:
+        emit(ev)
+    app._drain()        # 跑完所有 call_from_thread 调度, 不崩即过
 
 
 def test_spawn_command_creates_subagent(monkeypatch):
