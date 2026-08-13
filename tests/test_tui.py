@@ -123,3 +123,37 @@ def test_tui_at_prism_runs_with_fake_model():
         if app.agent.last_result:
             break
     assert app.agent.last_result == "prism-reply"
+
+
+def test_on_input_changed_slash_only_no_crash():
+    """★ 回归: 只输入 '/' → prefix='' 显示全部命令, 不崩(之前 IndexError)。
+    且 overlay content 非空(含 /命令) —— 抓 Static(body) 参数错位 bug。
+    """
+    app = mount()
+    app._on_input_changed("/")          # v[1:]="" → split=[] → prefix="" 不再越界
+    assert len(app._overlays) >= 1      # 显示了命令浮层
+    sl = app._overlays[0]["widget"]     # SelectList(非 Static)
+    assert hasattr(sl, "_filtered") and len(sl._filtered) > 0, "SelectList 无命令"
+    assert sl.selected_value(), "SelectList 无选中值"
+
+
+def test_on_input_changed_slash_prefix_filters():
+    app = mount()
+    app._on_input_changed("/r")         # 过滤 r 开头命令, 不崩
+    # 有 r 开头则显示 overlay, 无则 hide; 都不崩
+    assert True
+
+
+def test_on_input_changed_non_slash_hides():
+    app = mount()
+    app._on_input_changed("/")          # 先显示
+    assert len(app._overlays) >= 1
+    app._on_input_changed("hello")      # 非 / → hide
+    assert len(app._overlays) == 0
+
+
+def test_on_input_changed_slash_space_no_crash():
+    """边界: '/ ' (斜杠+空格) → split=[] → prefix='' 不崩。"""
+    app = mount()
+    app._on_input_changed("/ ")
+    assert True                         # 不崩即可

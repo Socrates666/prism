@@ -101,36 +101,36 @@ class RichLog(Widget):
         self._invalidate()
 
     def tool_start(self, name: str, args_str: str = "") -> dict:
-        # pi: bold 工具名内联在首行(非标题栏), args dim 跟后
-        head = f"[bold]{name}[/bold]" + (f"  [dim]{args_str}[/dim]" if args_str else "")
+        # 行动: 中文阶段标签 + 工具名 + args, pi 风格背景色带
+        head = f"[cyan]行动[/cyan] [bold]▸ {name}[/bold]" + (f"  [dim]{args_str}[/dim]" if args_str else "")
         b = {"name": name, "bg": self._bg("tool_pending_bg"), "body": [head]}
         self.entries.append(("block", b))
         self._invalidate()
         return b
 
     def tool_end(self, ref: dict, result: str, is_error: bool) -> None:
-        # pi: 状态只靠背景色传达(绿/红), 工具名保持 bold, 结果追加在下方
-        # 结果是数据(文件内容/命令输出) → 转义 [ 防 markup 吞字符
+        # 观察: ✓/✗ + 中文标签 + 工具名, 背景色传达状态(绿/红)
         ref["bg"] = self._bg("tool_error_bg" if is_error else "tool_success_bg")
-        head = f"[bold]{ref.get('name', '?')}[/bold]"
+        mark = "✗" if is_error else "✓"
+        head = f"[bold]{mark} 观察 · {ref.get('name', '?')}[/bold]"
         safe = (result or "").replace("[", "\\[")
         ref["body"] = [head] + ([safe] if safe else [])
         self._invalidate()
 
     def thinking(self, text: str) -> None:
-        # pi: 思考是 subtle/可折叠的内部推理 → dim inline 一行, 不做醒目全宽灰带
+        # 思考: 中文阶段标签 + dim italic 推理内容
         for sub in (text or "").split("\n"):
-            self.write(f"[dim italic]  {sub}[/dim italic]" if sub else "")
+            self.write(f"[blue]思考[/blue] [dim italic]▸ {sub}[/dim italic]" if sub else "")
 
     def cognitive(self, stage: str, content: str, based_on=None) -> None:
-        # 认知(直觉/反思)是 agent 内部推理 → dim inline 行 + 小色标, 不做醒目灰带
-        label = {"intuition": "◈", "reflect": "↺"}.get(stage, "·")
+        # 认知(直觉/反思): 中文阶段标签 + dim italic 内容
+        label = {"intuition": "直觉", "reflect": "反思"}.get(stage, stage or "·")
         color = "yellow" if stage == "reflect" else "magenta"
         bo = ""
         if based_on:
             safe = str(based_on).replace("[", "\\[")   # 防 [ 被当 markup 标签吞掉
             bo = f"  [dim](based_on {safe})[/dim]"
-        self.write(f"[{color}]{label}[/{color}] [dim italic]{content}[/dim italic]{bo}")
+        self.write(f"[{color}]{label}[/{color}] [dim italic]▸ {content}[/dim italic]{bo}")
 
     def _st(self, tok: str) -> Style:
         return self.app.style(tok) if self.app else Style()
@@ -233,6 +233,68 @@ class Static(Widget):
             buf.write_segments(x + 1, y + r, segs)
 
 
+class SelectList(Widget):
+    """可选列表(pi 风格 completion popup): items + 选中高亮 + 滚动窗口。
+
+    items: [{"value", "description"?}]; up/down 移 selected(循环); Tab 取 selected_value 补全。
+    """
+    can_focus = False
+
+    def __init__(self, items, id=None, max_visible=8):
+        super().__init__(id)
+        self.items = items
+        self.selected = 0
+        self.max_visible = max_visible
+        self._filtered = list(items)
+
+    def set_filter(self, prefix: str) -> None:
+        self._filtered = [i for i in self.items
+                          if i["value"].lower().startswith(prefix.lower())]
+        self.selected = 0
+
+    def move(self, d: int) -> None:
+        if self._filtered:
+            self.selected = (self.selected + d) % len(self._filtered)
+
+    def selected_value(self):
+        return self._filtered[self.selected]["value"] if self._filtered else None
+
+    def measure(self, width: int) -> int:
+        return min(len(self._filtered), self.max_visible)
+
+    def draw(self, buf, x, y, w, h) -> None:
+        iw = max(1, w - 2)
+        text_style = self.app.style("text") if self.app else None
+        n = len(self._filtered)
+        if n == 0:
+            segs = parse_markup("[dim]  无匹配命令[/dim]")
+            buf.write_segments(x + 1, y, [(t, text_style.merge(s)) for t, s in (segs[0] if segs else [])])
+            return
+        start = max(0, min(self.selected - self.max_visible // 2, n - self.max_visible))
+        end = min(start + self.max_visible, n)
+        row = 0
+        for i in range(start, end):
+            if row >= h:
+                break
+            item = self._filtered[i]
+            is_sel = (i == self.selected)
+            label = f"/{item['value']}"
+            desc = item.get("description", "")
+            line = (f"[bold cyan]▸ {label}[/bold cyan]" if is_sel else f"  [cyan]{label}[/cyan]")
+            if desc:
+                line += f"  [dim]{desc}[/dim]"
+            for rrow in (wrap_segments(parse_markup(line), iw) or [[]]):
+                if row >= h:
+                    break
+                buf.write_segments(x + 1, y + row, [(t, text_style.merge(s)) for t, s in rrow])
+                row += 1
+        if n > self.max_visible:                      # 滚动指示
+            info = f"[dim]  ({self.selected + 1}/{n})[/dim]"
+            segs = parse_markup(info)
+            buf.write_segments(x + 1, y + min(end - start, h) - 1,
+                               [(t, text_style.merge(s)) for t, s in (segs[0] if segs else [])])
+
+
 # ── Input(多行编辑器 + 光标) ─────────────────────────────────────────────────
 class Input(Widget):
     """编辑器。Enter 提交, Shift+Enter 换行(pi 同款)。边框颜色 = accent。"""
@@ -290,6 +352,8 @@ class Input(Widget):
         k = key.key
         if key.is_printable():
             self._insert(key.char)
+            if hasattr(self.app, "_on_input_changed"):
+                self.app._on_input_changed(self.value)
             return True
         if k == "enter":
             if key.shift:
@@ -299,7 +363,10 @@ class Input(Widget):
                 self.clear()
             return True
         if k == "backspace":
-            self._delete_back(); return True
+            self._delete_back()
+            if hasattr(self.app, "_on_input_changed"):
+                self.app._on_input_changed(self.value)
+            return True
         if k == "delete":
             self._delete_fwd(); return True
         if k == "left":
@@ -313,8 +380,12 @@ class Input(Widget):
             nxt = self.value.find("\n", self._line_starts()[rc[0]])
             self.pos = nxt if nxt != -1 else len(self.value); return True
         if k == "up":
+            if hasattr(self.app, "_completion_active") and self.app._completion_active():
+                self.app._completion_move(-1); return True
             self._move_line(-1); return True
         if k == "down":
+            if hasattr(self.app, "_completion_active") and self.app._completion_active():
+                self.app._completion_move(1); return True
             self._move_line(1); return True
         if k == "ctrl+a":
             self.pos = self._line_starts()[self._cursor_rc()[0]]; return True

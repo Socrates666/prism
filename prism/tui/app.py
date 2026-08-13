@@ -71,6 +71,8 @@ class App:
         self._themes: dict[str, dict] = {"dark": DARK, "light": LIGHT}
         self.available_themes: dict[str, dict] = self._themes
         self._widgets: list[Widget] = []
+        self._overlays: list[dict] = []   # 浮层: [{id, widget, x, y, w, h}] 后画覆盖主布局
+        self._overlay_seq: int = 0
         self._focusable: list[Widget] = []
         self._focus_idx: int = -1
         self._calls: _q.Queue = _q.Queue()
@@ -229,9 +231,11 @@ class App:
                 log.write("[dim](Ctrl+C again to quit)[/dim]")
             self.request_render()
             return
-        # Tab 循环焦点
+        # Tab: dock 聚焦时交 on_tab 钩子(@agent 填充); 否则循环焦点
         if k == "tab":
-            self._cycle_focus()
+            inp = self._focusable[self._focus_idx] if self._focus_idx >= 0 else None
+            if not self.on_tab(inp):
+                self._cycle_focus()
             return
         # 滚动键 → transcript(即便焦点在 Input)
         log = self.query_one("#transcript")
@@ -245,6 +249,15 @@ class App:
                 log.scroll_home(); self.request_render(); return
             if k == "end":
                 log.scroll_end(); self.request_render(); return
+            # up/down: 输入框单行时滚 transcript(多行时光标给 Input, 不破坏多行编辑)
+            if k in ("up", "down"):
+                try:
+                    dock = self.query_one("#dock")
+                    if "\n" not in (dock.value or ""):
+                        (log.scroll_up if k == "up" else log.scroll_down)(3)
+                        self.request_render(); return
+                except Exception:
+                    pass
         # 先给焦点 widget
         if self._focus_idx >= 0 and self._focusable[self._focus_idx].on_key(key):
             self.request_render()
@@ -252,6 +265,14 @@ class App:
         # 再给 app
         self.on_key(key)
         self.request_render()
+
+    def on_tab(self, inp) -> bool:
+        """Tab 钩子: 聚焦 widget 是 inp。返回 True 拦截(不焦点切换), False 放行。默认放行。"""
+        return False
+
+    def _on_input_changed(self, value: str) -> None:
+        """Input value 变化钩子(输入字符/backspace)。默认 no-op, 子类重写(如 / 补全)。"""
+        pass
 
     def _cycle_focus(self) -> None:
         if not self._focusable:
@@ -274,7 +295,27 @@ class App:
                 w.draw(buf, x, y, w_, h)
             except Exception:  # noqa
                 pass
+        # 浮层(overlay): 主布局画完后叠在上方(后画的覆盖) —— completion popup 等
+        for ov in list(self._overlays):
+            try:
+                ov["widget"].draw(buf, ov["x"], ov["y"], ov["w"], ov["h"])
+            except Exception:  # noqa
+                pass
         return buf
+
+    def show_overlay(self, widget, x: int, y: int, w: int, h: int) -> int:
+        """显示浮层: widget 画到 buf 的 (x,y,w,h) 区域, 覆盖主布局。返回 overlay id(供 hide)。"""
+        self._overlay_seq += 1
+        widget.app = self
+        self._overlays.append({"id": self._overlay_seq, "widget": widget,
+                               "x": x, "y": y, "w": w, "h": h})
+        self.request_render()
+        return self._overlay_seq
+
+    def hide_overlay(self, ov_id: int) -> None:
+        """隐藏浮层(按 show_overlay 返回的 id)。"""
+        self._overlays = [o for o in self._overlays if o["id"] != ov_id]
+        self.request_render()
 
     def render_to_string(self, rows: int = 24, cols: int = 80) -> str:
         """无终端渲染快照(测试 / 调试用)。"""

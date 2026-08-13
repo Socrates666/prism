@@ -17,6 +17,8 @@ class PrismApp(App):
 Screen { layout: vertical; }
 #transcript { height: 1fr; border: round $accent; padding: 0 1; }
 #current { height: auto; min-height: 1; padding: 0 1; }
+#status { height: 1; padding: 0 1; color: $accent; }
+#completion { height: auto; min-height: 0; padding: 0 1; }
 #dock { height: auto; min-height: 3; border: round $accent; padding: 0 1; }
 """
     TITLE = "Prism"
@@ -31,6 +33,7 @@ Screen { layout: vertical; }
         yield Header(id="header")
         yield RichLog(id="transcript", wrap=True)
         yield Static(id="current")
+        yield Static(id="status")
         yield Input(id="dock", placeholder="")
         yield Footer(id="footer")
 
@@ -43,6 +46,87 @@ Screen { layout: vertical; }
                 if isinstance(log, RichLog):
                     log.write("[yellow]⏹ 已中断[/yellow]")
 
+    def on_tab(self, inp) -> bool:
+        """Tab: / 模式+completion 可见 → 补全选中命令; 否则 @agent 智能填充。
+        """
+        v = (inp.value or "").lstrip() if inp is not None else ""
+        if v.startswith("/") and self._completion_active():
+            sl = self._cmd_selectlist()
+            if sl:
+                val = sl.selected_value()
+                if val:
+                    inp.value = f"/{val} "
+                    inp.pos = len(inp.value)
+                    self._hide_cmd_overlay()
+                    self.request_render()
+                return True
+        if inp is None or getattr(inp, "id", "") != "dock" or self.agent is None:
+            return False
+        agents = [n for n, v in self.agent.namespace.items() if hasattr(v, "inject")]
+        if not agents:
+            return False
+        import re
+        cur = inp.value or ""
+        pos = getattr(inp, "pos", len(cur))
+        left, right = cur[:pos], cur[pos:]
+        m = re.search(r"@(\w+)$", left)            # 光标左侧紧贴的 @agent
+        if m and m.group(1) in agents:              # → 替换切下一个
+            nxt = agents[(agents.index(m.group(1)) + 1) % len(agents)]
+            new_left = left[:m.start()] + f"@{nxt}"
+        else:                                        # → 光标处新增
+            existing = [a for a in re.findall(r"@(\w+)", cur) if a in agents]
+            nxt = agents[(agents.index(existing[-1]) + 1) % len(agents)] if existing else agents[0]
+            new_left = left + f"@{nxt} "
+        inp.value = new_left + right
+        inp.pos = len(new_left)
+        self.request_render()
+        return True
+
+    def _on_input_changed(self, value: str) -> None:
+        """输入变化: / 开头 → 浮层 SelectList(pi 风格, 可选+高亮+箭头+Tab补全)。"""
+        v = value.lstrip()
+        if not v.startswith("/"):
+            self._hide_cmd_overlay()
+            return
+        rest = v[1:]
+        parts = rest.split()
+        prefix = parts[0] if parts else ""
+        cmds = sorted(self.commands.keys()) + ["revert", "backups"]
+        from prism.tui.widgets import SelectList
+        sl = self._cmd_selectlist()
+        if sl is None:                                   # 首次: 建浮层(全量, filter 内部过滤)
+            h = min(len(cmds), 8)
+            y = max(0, self._rows - 6 - h)
+            sl = SelectList([{"value": c} for c in cmds])
+            self._cmd_overlay = self.show_overlay(sl, 1, y, max(1, self._cols - 2), h)
+        sl.set_filter(prefix)                            # 过滤(复用 overlay, 不重建)
+        self.request_render()
+
+    def _cmd_selectlist(self):
+        """当前命令浮层的 SelectList(无则 None)。"""
+        oid = getattr(self, "_cmd_overlay", None)
+        if oid is None:
+            return None
+        for ov in self._overlays:
+            if ov["id"] == oid:
+                return ov["widget"]
+        return None
+
+    def _completion_active(self) -> bool:
+        return getattr(self, "_cmd_overlay", None) is not None
+
+    def _completion_move(self, d: int) -> None:
+        sl = self._cmd_selectlist()
+        if sl is not None:
+            sl.move(d)
+            self.request_render()
+
+    def _hide_cmd_overlay(self) -> None:
+        oid = getattr(self, "_cmd_overlay", None)
+        if oid is not None:
+            self.hide_overlay(oid)
+            self._cmd_overlay = None
+
     # ── 装配 agent + emit(跨线程) ─────────────────────────────────────────
     def on_mount(self) -> None:
         from .agent import Agent
@@ -52,11 +136,43 @@ Screen { layout: vertical; }
 
         log = self.query_one("#transcript")
         current = self.query_one("#current")
+        status = self.query_one("#status")
         app = self
 
         reasoning_buf: list[str] = []
         current_buf: list[str] = []
         pending_tool: list = [None]     # 跨 start/end 的工具块引用(cell)
+
+        # 折射中... 动画(agent 工作时, 输入框正上方)
+        import threading as _th
+        _status_anim = {"stop": None, "thread": None}
+
+        def _status_loop() -> None:
+            n = 0
+            while _status_anim["stop"] and not _status_anim["stop"].is_set():
+                dots = "." * (n % 4)
+                try:
+                    app.call_from_thread(status.update, f"[bold cyan]◇ Refracting[/bold cyan]{dots}")
+                except Exception:
+                    pass
+                n += 1
+                _status_anim["stop"].wait(0.4)
+
+        def _start_status() -> None:
+            if _status_anim["thread"] and _status_anim["thread"].is_alive():
+                return
+            _status_anim["stop"] = _th.Event()
+            _t0 = _th.Thread(target=_status_loop, daemon=True)
+            _status_anim["thread"] = _t0
+            _t0.start()
+
+        def _stop_status() -> None:
+            if _status_anim["stop"]:
+                _status_anim["stop"].set()
+            try:
+                app.call_from_thread(status.update, "")
+            except Exception:
+                pass
 
         def update_current() -> None:
             app.call_from_thread(current.update, "".join(current_buf))
@@ -78,8 +194,11 @@ Screen { layout: vertical; }
             t = event.get("type")
             if t == "agent_start":
                 app._agent_busy = True
+                _start_status()
             elif t in ("agent_end", "steer_interrupt"):
                 app._agent_busy = False
+                _stop_status()
+                app.call_from_thread(log.write, "")   # 回合结束 → 空行分隔下一回合(回合内紧凑)
             if t == "message_update":
                 flush_reasoning()
                 current_buf.append(event.get("delta", ""))
@@ -139,13 +258,22 @@ Screen { layout: vertical; }
             if sections:
                 self.agent.apply_prompt(sections, "Prism", "main")
             self.agent.hooks["emit"] = emit
-        # 认知层(RLM): forest + 小模型直觉(Phase C) —— 接入自研 tui 的 log.cognitive/thinking
+        # 认知层(RLM): forest + 直觉(开关 PRISM_INTUITION=off/heuristic/small, 默认 small)
+        import os as _os
         from .forest import SQLiteForest
         from .cog_patches import enable_cognitive_cycle
         self.agent.forest = SQLiteForest(".prism/forest.db", session_id=self.agent.name)
-        from .model import OpenAIModel as _OM
-        enable_cognitive_cycle(self.agent,
-            intuition_model=_OM(model="glm-4.5-air", thinking_level="off"))
+        _intui = _os.environ.get("PRISM_INTUITION", "small").lower()
+        if _intui == "off":
+            enable_cognitive_cycle(self.agent)
+            from .cognitive import NullIntuition
+            self.agent.intuition = NullIntuition()        # 关直觉
+        elif _intui == "heuristic":
+            enable_cognitive_cycle(self.agent)            # 启发式(intuition_model=None)
+        else:                                              # small: glm-4.5-air
+            from .model import OpenAIModel as _OM
+            enable_cognitive_cycle(self.agent,
+                intuition_model=_OM(model="glm-4.5-air", thinking_level="off"))
         self.agent.namespace["theme"] = ThemeCtl(self)
         for sub in subs:
             self.agent.namespace[sub.name] = sub
