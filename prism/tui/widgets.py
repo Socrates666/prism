@@ -67,6 +67,7 @@ class RichLog(Widget):
         self.wrap = wrap
         self.entries: list = []          # [("line", markup)] 或 [("block", dict)]
         self.max_entries = 2000          # 容量上限: 超限从头部丢弃(长会话内存有界)
+        self._thinking_open = False      # 连续思考块状态(一次思考一个标签)
         self._follow = True              # 贴底跟随
         self._top = 0                    # 顶部跳过的 unit 数(_units 窗口内索引)
         self._cache_iw = -1
@@ -98,6 +99,8 @@ class RichLog(Widget):
     def _append(self, item) -> None:
         # 统一 append 入口(write/user/tool_start/代码块全走这): 超容量从头部丢弃,
         # 窗口/锚索引随平移, 视口顶 unit 对象不变(下次重建按锚重定位, 不漂移)。
+        # 非思考内容打断连续思考块 → 下次 thinking 重新带标签。
+        self._thinking_open = False
         self.entries.append(item)
         drop = len(self.entries) - self.max_entries
         if drop > 0:
@@ -161,9 +164,16 @@ class RichLog(Widget):
         self._invalidate()
 
     def thinking(self, text: str) -> None:
-        # 思考: 中文阶段标签 + dim italic 推理内容
+        # 思考: 一次思考一个标签(用户裁决) —— 连续思考行仅首行带[思考]标签,
+        # 续行缩进续排; 任何其他输出(消息/工具/用户)插入后, 新思考重新带标签
         for sub in (text or "").split("\n"):
-            self.write(f"[blue]思考[/blue] [dim italic]▸ {sub}[/dim italic]" if sub else "")
+            if not sub:
+                continue
+            if self._thinking_open:
+                self.write(f"[dim italic]  {sub}[/dim italic]")
+            else:
+                self.write(f"[blue]思考[/blue] [dim italic]▸ {sub}[/dim italic]")
+            self._thinking_open = True
 
     def cognitive(self, stage: str, content: str, based_on=None) -> None:
         # 认知(直觉/反思): 中文阶段标签 + dim italic 内容
