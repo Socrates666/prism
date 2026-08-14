@@ -29,3 +29,6 @@ workspaces/
 
 # agent 运行时记忆(运行时状态, 不入库; 历史版本在 git 历史)
 .prism/memory/
+
+# 二重树反思实验: 运行时数据(forest.db/events/transcript/game.html); 报告与指标入库存档
+research/dual-tree-reflection/runs/
