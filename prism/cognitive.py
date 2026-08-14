@@ -72,9 +72,42 @@ class Forest(ABC):
     def walk(self, node: int, relation: str, depth: int | None = None) -> list[dict]:
         """沿指定边递归走。causes→搜索链; based_on→自指链(套娃路径)。"""
 
-    def prune(self, root: int) -> int:
-        """剪枝: 老子树压成摘要节点存回(plan/rlm/cycle.md 第三触发器)。
-        默认 no-op(子类 override)。返回摘要节点 id, 未实现返回 -1。"""
+    # ── 搜索辅助(带默认实现, SQLiteForest override 成索引友好) ──
+    def last_tree_id(self) -> int | None:
+        """最新树的 tree_id; None=本 session 无节点。
+        直觉 search-state 的入口(O(1) 优于 trees() 全扫)。
+        默认实现走 trees()[-1]; SQLiteForest override 用 id 倒序 LIMIT 1。
+        """
+        ts = self.trees()
+        return ts[-1] if ts else None
+
+    def recent_in_tree(self, tree_id: int, *, type: str | None = None,
+                       status: str | None = None, limit: int | None = None) -> list[dict]:
+        """某树内按 (type, status) 过滤的最近 limit 个节点(时间正序)。
+        直觉热路径用这个: 期望 O(limit), 不随树规模线性增长。
+        默认实现走 nodes_in_tree + 内存过滤(O(K)); SQLiteForest override 走覆盖索引 O(L)。
+        """
+        nodes = self.nodes_in_tree(tree_id)
+        if type is not None:
+            nodes = [n for n in nodes if n.get("type") == type]
+        if status is not None:
+            nodes = [n for n in nodes if n.get("status") == status]
+        if limit is not None:
+            nodes = nodes[-limit:]
+        return nodes
+
+    def prune(self, root: int, summary: str) -> int:
+        """剪枝: 把 root 的 causes 子树压成一个摘要节点存回(cycle.md 第三触发器)。
+
+        结构阈值触发(树超规模 / 任务边界): 控膨胀。
+        语义:
+          - 物理删除子树全部节点 + 子树内部边
+          - 新建 summary 节点(type="summary"), 占 root 的 causes 位置(parent=root.parent)
+          - 子树外指向子树内节点的入边(based_on/references/...)重连到 summary(保外部认知关联)
+          - 单事务原子(all-or-nothing)
+        摘要文本由调用方传入(forest 不依赖 LLM, 机制/策略分离)。
+        返回 summary 节点 id; root 不存在或 summary 空 → 返回 -1(不改树)。
+        默认 no-op(子类 override)。"""
         return -1
 
 

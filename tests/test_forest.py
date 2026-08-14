@@ -146,3 +146,68 @@ def test_cross_thread_access(tmp_path):
     t.start(); t.join()
     assert not errors, f"跨线程访问出错: {errors}"
     forest.close()
+
+
+# ── prune: 剪枝(子树压成摘要节点, cycle.md 第三触发器) ──
+def test_prune_collapses_subtree_to_summary(forest):
+    """prune: 子树压成一个 summary 节点, 旧节点物理删除。"""
+    root = forest.add_node(category=THINKING, type="thought", content="根")
+    c1 = forest.add_node(category=THINKING, type="thought", content="c1", parent=root)
+    c2 = forest.add_node(category=CONTEXT, type="result", content="c2", parent=c1)
+    sid = forest.prune(root, "子树摘要")
+    assert sid > 0
+    summary = forest.get(sid)
+    assert summary["type"] == "summary"
+    assert summary["content"] == "子树摘要"
+    assert summary["category"] == THINKING
+    # 子树节点已物理删除
+    assert forest.get(root) is None
+    assert forest.get(c1) is None
+    assert forest.get(c2) is None
+    # root 无 parent → summary 成为新树根
+    assert summary["parent_id"] is None
+
+
+def test_prune_summary_inherits_causes_position(forest):
+    """prune: summary 占 root 的 causes 位置(parent=root 的父)。"""
+    top = forest.add_node(category=THINKING, type="thought", content="顶")
+    sub_root = forest.add_node(category=THINKING, type="thought", content="子树根", parent=top)
+    forest.add_node(category=THINKING, type="thought", content="叶", parent=sub_root)
+    sid = forest.prune(sub_root, "摘要")
+    summary = forest.get(sid)
+    assert summary["parent_id"] == top            # 占 sub_root 的位置
+    # top 的 causes 子现在是 summary(不再是 sub_root)
+    assert [n["id"] for n in forest.walk(top, CAUSES)] == [sid]
+
+
+def test_prune_reconnects_external_based_on(forest):
+    """prune: 子树外指向子树内的入边重连到 summary(保外部认知关联)。"""
+    ext = forest.add_node(category=THINKING, type="reflection", content="外部反思")
+    root = forest.add_node(category=THINKING, type="thought", content="根")
+    c1 = forest.add_node(category=THINKING, type="thought", content="c1", parent=root)
+    forest.add_edge(ext, BASED_ON, c1)            # 外部 based_on 子树内 c1
+    sid = forest.prune(root, "压扁")
+    # ext 的 based_on 重连到 summary(c1 已删, 但关联不丢)
+    assert [n["id"] for n in forest.walk(ext, BASED_ON)] == [sid]
+
+
+def test_prune_empty_summary_returns_minus1_unchanged(forest):
+    """prune: 空 summary 返回 -1 且不改树(原子守门)。"""
+    root = forest.add_node(category=THINKING, type="thought", content="根")
+    c1 = forest.add_node(category=THINKING, type="thought", content="c1", parent=root)
+    assert forest.prune(root, "") == -1
+    assert forest.prune(root, "   ") == -1
+    # 树原封不动
+    assert forest.get(root) is not None
+    assert forest.get(c1) is not None
+
+
+def test_prune_nonexistent_root_returns_minus1(forest):
+    """prune: root 不存在 → -1。"""
+    assert forest.prune(99999, "x") == -1
+
+
+def test_null_forest_prune_degrades():
+    """NullForest.prune 也 no-op(返回 -1)。"""
+    from prism.cognitive import NullForest
+    assert NullForest().prune(1, "x") == -1
