@@ -7,6 +7,9 @@ C 阶段(plan/rlm Phase C): 换成小模型 IntuitionBackend(智能选/排/临�
 本类是对照组/降级实现 —— 涌现实验里它是 baseline, 小模型是实验组。
 
 设计(plan/rlm/cycle.md): 直觉 = READ(不写回树), 每次循环, 不可绕过。
+
+复杂度(research/ANALYSIS.md): last_tree_id O(1) + 3× recent_in_tree O(L)。
+  不再随总节点数 N / 树规模 K 线性增长 —— 走覆盖索引 top-N。
 """
 from __future__ import annotations
 from .cognitive import IntuitionBackend
@@ -15,18 +18,22 @@ from .cognitive import IntuitionBackend
 class HeuristicIntuition(IntuitionBackend):
     """启发式直觉: recency + 失败/反思 显现, 无模型。"""
 
-    def __init__(self, forest, max_thoughts: int = 5):
+    def __init__(self, forest, max_thoughts: int = 5, max_failed: int = 20):
         self.forest = forest
         self.max_thoughts = max_thoughts
+        # failed/reflection 也限上限: search-state 不该随树规模无限膨胀(O(常数))
+        self.max_failed = max_failed
 
     def select_context(self, agent, state: dict) -> list[dict]:
-        trees = self.forest.trees()
-        if not trees:
+        tid = self.forest.last_tree_id()          # O(1), 替代 trees() 全扫
+        if tid is None:
             return []
-        nodes = self.forest.nodes_in_tree(trees[-1])   # 最新一棵树
-        thoughts = [n for n in nodes if n["type"] == "thought"][-self.max_thoughts:]
-        failed = [n for n in nodes if n["status"] == "failed"]
-        reflections = [n for n in nodes if n["type"] == "reflection"]
+        thoughts = self.forest.recent_in_tree(
+            tid, type="thought", limit=self.max_thoughts)     # O(max_thoughts)
+        failed = self.forest.recent_in_tree(
+            tid, status="failed", limit=self.max_failed)        # O(max_failed)
+        reflections = self.forest.recent_in_tree(
+            tid, type="reflection", limit=self.max_failed)     # O(max_failed)
         if not (thoughts or failed or reflections):
             return []
         lines = ["[认知树·直觉 search-state]"]

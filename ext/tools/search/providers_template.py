@@ -30,6 +30,16 @@ import json
 # ── 延迟注册队列 ──────────────────────────────────────
 _PENDING_PROVIDERS: list = []
 
+# 外发域名白名单(SSRF 防护): query 来自 LLM, 域名钉死。新增平台时把 API 域名加进来。
+_ALLOWED_HOSTS = {"api.bilibili.com"}
+
+
+def _assert_allowed_url(url: str) -> None:
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    if parts.scheme != "https" or (parts.hostname or "").lower() not in _ALLOWED_HOSTS:
+        raise ValueError(f"[blocked] 非白名单请求目标: {parts.scheme}://{parts.hostname}")
+
 
 # === 示例: B站搜索 (非官方 API) ===
 def _bilibili_search(query: str, num_results: int = 5) -> str:
@@ -39,6 +49,7 @@ def _bilibili_search(query: str, num_results: int = 5) -> str:
         f"?search_type=video&keyword={urllib.parse.quote(query)}"
         f"&page_size={num_results}&page=1"
     )
+    _assert_allowed_url(api_url)
     headers = {"User-Agent": "Mozilla/5.0"}
     req = urllib.request.Request(api_url, headers=headers)
     with urllib.request.urlopen(req, timeout=15) as resp:

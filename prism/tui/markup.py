@@ -12,7 +12,60 @@
 """
 from __future__ import annotations
 from dataclasses import dataclass, replace
+import os
 import unicodedata
+
+
+# ── 色彩能力探测(truecolor → 256 → 单色 降级链) ─────────────────────────
+# 默认偏 truecolor(与历史行为一致); 256 色终端自动降级; PRISM_COLOR 可强制。
+def _detect_color_mode() -> int:
+    """0=单色 1=256色 2=truecolor。"""
+    env = os.environ.get("PRISM_COLOR", "").lower()
+    if env in ("truecolor", "24bit", "2"):
+        return 2
+    if env in ("256", "1"):
+        return 1
+    if env in ("mono", "0", "off", "none"):
+        return 0
+    if os.environ.get("NO_COLOR"):
+        return 0
+    ct = os.environ.get("COLORTERM", "").lower()
+    if "truecolor" in ct or "24bit" in ct:
+        return 2
+    if os.environ.get("WT_SESSION"):              # Windows Terminal
+        return 2
+    if os.environ.get("TERM_PROGRAM") in ("vscode", "ghostty", "wezterm", "iTerm.app"):
+        return 2
+    if "256color" in os.environ.get("TERM", ""):
+        return 1                                  # 256 色终端: RGB 自动降级
+    return 2                                      # 无明确信号时保持 truecolor(不回退)
+
+
+_COLOR_MODE = _detect_color_mode()
+
+
+def color_mode() -> int:
+    """当前色彩能力(诊断用): 0=单色 1=256色 2=truecolor。"""
+    return _COLOR_MODE
+
+
+def _rgb_to_256(c) -> int:
+    """RGB → 最近 xterm-256 索引(6×6×6 立方体 + 灰阶, 两候选取近)。"""
+    r, g, b = c
+    cube = lambda v: round(v / 255 * 5)           # noqa: E731
+    idx = 16 + 36 * cube(r) + 6 * cube(g) + cube(b)
+    gray = round((r + g + b) / 3 / 255 * 23) + 232
+
+    def dist(i: int) -> int:
+        if i >= 232:
+            v = (i - 232) * 255 // 23
+            rgb = (v, v, v)
+        else:
+            t = i - 16
+            rgb = (t // 36 * 51, t // 6 % 6 * 51, t % 6 * 51)
+        return (r - rgb[0]) ** 2 + (g - rgb[1]) ** 2 + (b - rgb[2]) ** 2
+
+    return min((idx, gray), key=dist)
 
 
 def char_width(ch: str) -> int:
@@ -70,11 +123,15 @@ _STYLE_ATTR = {"bold", "italic", "dim", "underline"}
 
 
 def _fg_code(c) -> str | None:
-    """颜色(int 索引 / RGB 元组) → ANSI fg 码。"""
+    """颜色(int 索引 / RGB 元组) → ANSI fg 码。RGB 按色彩能力降级(truecolor/256/无)。"""
     if c is None:
         return None
     if isinstance(c, tuple):
-        return f"38;2;{c[0]};{c[1]};{c[2]}"     # truecolor
+        if _COLOR_MODE >= 2:
+            return f"38;2;{c[0]};{c[1]};{c[2]}"     # truecolor
+        if _COLOR_MODE == 1:
+            return f"38;5;{_rgb_to_256(c)}"          # 256 色终端降级
+        return None                                   # 单色
     if 0 <= c < 8:
         return str(30 + c)
     if 8 <= c < 16:

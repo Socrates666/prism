@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prism — Agentic TUI Dashboard</title>
+<style>
+:root {
+  --bg: #0a0e1a;
+  --bg2: #111827;
+  --fg: #e2e8f0;
+  --muted: #64748b;
+  --accent: #06b6d4;
+  --accent2: #8b5cf6;
+  --green: #10b981;
+  --red: #ef4444;
+  --yellow: #f59e0b;
+  --border: #1e293b;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'SF Mono','JetBrains Mono','Cascadia Code','Consolas',monospace;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+canvas#bg { position:fixed; top:0; left:0; z-index:0; pointer-events:none; }
+.container { position:relative; z-index:1; max-width:1400px; margin:0 auto; padding:24px; }
+
+/* Hero */
+.hero { text-align:center; padding:60px 0 40px; }
+.hero h1 {
+  font-size:3.5em; font-weight:900; letter-spacing:-0.05em;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  display:inline-block;
+}
+.hero .tagline { color:var(--muted); font-size:1.1em; margin-top:8px; }
+.hero .stats { display:flex; justify-content:center; gap:32px; margin-top:32px; }
+.hero .stat { text-align:center; }
+.hero .stat .num { font-size:2em; font-weight:700; color:var(--accent); }
+.hero .stat .label { font-size:0.75em; color:var(--muted); text-transform:uppercase; }
+
+/* Sections */
+.section { margin:48px 0; }
+.section-title {
+  font-size:1.4em; font-weight:700; margin-bottom:20px;
+  display:flex; align-items:center; gap:8px;
+}
+.section-title::before {
+  content:''; width:4px; height:24px; background:var(--accent); border-radius:2px;
+}
+
+/* Cards grid */
+.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px; }
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  transition: all 0.3s ease;
+  cursor:pointer;
+}
+.card:hover { border-color:var(--accent); transform:translateY(-2px); box-shadow:0 8px 24px rgba(6,182,212,0.15); }
+.card .icon { font-size:1.8em; margin-bottom:8px; }
+.card .name { font-weight:700; font-size:1.1em; }
+.card .desc { color:var(--muted); font-size:0.85em; margin-top:6px; line-height:1.5; }
+.card .meta { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+.badge {
+  font-size:0.7em; padding:2px 8px; border-radius:6px;
+  background:rgba(6,182,212,0.15); color:var(--accent);
+  border:1px solid rgba(6,182,212,0.3);
+}
+.badge.green { background:rgba(16,185,129,0.15); color:var(--green); border-color:rgba(16,185,129,0.3); }
+.badge.purple { background:rgba(139,92,246,0.15); color:var(--accent2); border-color:rgba(139,92,246,0.3); }
+
+/* Architecture diagram */
+.arch { display:flex; flex-direction:column; align-items:center; gap:0; padding:20px; }
+.arch-layer {
+  display:flex; gap:12px; padding:12px 20px;
+  background:var(--bg2); border:1px solid var(--border); border-radius:10px;
+  position:relative;
+}
+.arch-layer.main { border-color:var(--accent); }
+.arch-layer.sub { border-color:var(--accent2); }
+.arch-arrow { color:var(--muted); font-size:1.2em; margin:4px 0; }
+.arch-box {
+  padding:8px 16px; border-radius:8px; font-size:0.85em; font-weight:600;
+  background:var(--bg); border:1px solid var(--border);
+}
+.arch-box.accent { border-color:var(--accent); color:var(--accent); }
+.arch-box.purple { border-color:var(--accent2); color:var(--accent2); }
+.arch-box.green { border-color:var(--green); color:var(--green); }
+
+/* Code block */
+.code-block {
+  background:#0d1117; border:1px solid var(--border); border-radius:8px;
+  padding:16px; overflow-x:auto; font-size:0.85em; line-height:1.6;
+}
+.code-block .kw { color:#ff7b72; }
+.code-block .str { color:#a5d6ff; }
+.code-block .com { color:#8b949e; }
+.code-block .fn { color:#d2a8ff; }
+.code-block .num { color:#79c0ff; }
+
+/* Tabs */
+.tabs { display:flex; gap:4px; margin-bottom:16px; border-bottom:1px solid var(--border); }
+.tab { padding:8px 16px; cursor:pointer; color:var(--muted); font-size:0.9em; border-bottom:2px solid transparent; transition:all 0.2s; }
+.tab:hover { color:var(--fg); }
+.tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+.tab-panel { display:none; }
+.tab-panel.active { display:block; }
+
+/* Timeline */
+.timeline { position:relative; padding-left:24px; }
+.timeline::before { content:''; position:absolute; left:6px; top:0; bottom:0; width:2px; background:var(--border); }
+.timeline-item { position:relative; padding:12px 0 12px 16px; }
+.timeline-item::before { content:''; position:absolute; left:-22px; top:18px; width:10px; height:10px; border-radius:50%; background:var(--accent); border:2px solid var(--bg); }
+.timeline-time { color:var(--muted); font-size:0.8em; }
+.timeline-title { font-weight:600; margin:4px 0; }
+.timeline-desc { color:var(--muted); font-size:0.85em; }
+
+/* Clock */
+.clock {
+  position:fixed; top:20px; right:24px; z-index:10;
+  font-size:1.2em; font-weight:700; color:var(--accent);
+  text-shadow:0 0 20px rgba(6,182,212,0.5);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .hero h1 { font-size:2em; }
+  .hero .stats { flex-direction:column; gap:12px; }
+  .grid { grid-template-columns:1fr; }
+}
+</style>
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+<div class="clock" id="clock"></div>
+
+<div class="container">
+
+<!-- HERO -->
+<div class="hero">
+  <h1>◢ PRISM ◣</h1>
+  <div class="tagline">Agentic TUI — 递归语言模型 · 热插拔架构 · 子 agent 分治</div>
+  <div class="stats" id="stats"></div>
+</div>
+
+<!-- TABS -->
+<div class="section">
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('agents')">Agents</div>
+    <div class="tab" onclick="switchTab('skills')">Skills</div>
+    <div class="tab" onclick="switchTab('tools')">Tools</div>
+    <div class="tab" onclick="switchTab('arch')">Architecture</div>
+    <div class="tab" onclick="switchTab('timeline')">Timeline</div>
+  </div>
+
+  <!-- AGENTS -->
+  <div class="tab-panel active" id="tab-agents">
+    <div class="grid" id="agents-grid"></div>
+  </div>
+
+  <!-- SKILLS -->
+  <div class="tab-panel" id="tab-skills">
+    <div class="grid" id="skills-grid"></div>
+  </div>
+
+  <!-- TOOLS -->
+  <div class="tab-panel" id="tab-tools">
+    <div class="grid" id="tools-grid"></div>
+  </div>
+
+  <!-- ARCHITECTURE -->
+  <div class="tab-panel" id="tab-arch">
+    <div class="section-title">System Architecture</div>
+    <div class="arch">
+      <div class="arch-layer main">
+        <div class="arch-box accent">PrismApp (textual TUI)</div>
+        <div class="arch-box">Input ← /command | @agent | Python</div>
+        <div class="arch-box">Transcript (RichLog)</div>
+      </div>
+      <div class="arch-arrow">↕ emit (events)</div>
+      <div class="arch-layer main">
+        <div class="arch-box accent">Prism (main agent)</div>
+        <div class="arch-box">python tool</div>
+        <div class="arch-box">search tool</div>
+        <div class="arch-box">steer_check</div>
+      </div>
+      <div class="arch-arrow">↕ inject / namespace</div>
+      <div class="arch-layer sub">
+        <div class="arch-box purple">coder</div>
+        <div class="arch-box purple">skill-creator</div>
+        <div class="arch-box purple">...</div>
+      </div>
+      <div class="arch-arrow">↕</div>
+      <div class="arch-layer">
+        <div class="arch-box green">ext/agents/</div>
+        <div class="arch-box green">ext/tools/</div>
+        <div class="arch-box green">ext/skills/</div>
+        <div class="arch-box green">ext/commands/</div>
+      </div>
+    </div>
+
+    <div style="margin-top:32px">
+      <div class="section-title">Agent Loop</div>
+<pre class="code-block"><span class="com"># function-calling loop + steer + 五扩展点 patch</span>
+<span class="kw">for</span> turn <span class="kw">in</span> range(max_turns):
+    <span class="kw">if</span> abort.is_set(): <span class="kw">break</span>
+    <span class="kw">if</span> <span class="fn">steer_check</span>():          <span class="com"># inbox 有插队消息</span>
+        <span class="kw">break</span>                   <span class="com"># 中断当前 run</span>
+    
+    text, tool_calls = model.<span class="fn">chat_stream</span>(messages)
+    <span class="kw">if</span> <span class="kw">not</span> tool_calls: <span class="kw">break</span>     <span class="com"># 纯文本回答 → 结束</span>
+    
+    <span class="kw">for</span> tc <span class="kw">in</span> tool_calls:       <span class="com"># 执行工具调用</span>
+        result = tool.<span class="fn">execute</span>(tc.args)
+        messages.<span class="fn">append</span>(result)</pre>
+    </div>
+
+    <div style="margin-top:32px">
+      <div class="section-title">File Lock</div>
+<pre class="code-block"><span class="com"># 多 agent 并发改代码的安全网</span>
+<span class="fn">acquire_lock</span>(path, agent_name) → <span class="kw">True</span> | (<span class="kw">False</span>, holder)
+<span class="fn">release_lock</span>(path, agent_name)
+
+<span class="com"># edit_file → write_file 流程</span>
+edit_file(<span class="str">"prism/shell.py"</span>)     <span class="com"># 锁定</span>
+write_file(<span class="str">"prism/shell.py"</span>, code) <span class="com"># 写入 + 自动备份 + 释放锁</span></pre>
+    </div>
+  </div>
+
+  <!-- TIMELINE -->
+  <div class="tab-panel" id="tab-timeline">
+    <div class="timeline" id="timeline"></div>
+  </div>
+</div>
+
+</div>
+
+<script>
+// === DATA ===
+const DATA = {
+  agents: [
+    {icon:"◆", name:"Prism", desc:"主 agent。IPython 内核 + function-calling loop + steer 插队", kind:"main", badges:["python","search","steer","compact"]},
+    {icon:"▲", name:"coder", desc:"编码子 agent。项目文件读写 + 文件锁 + 自动备份回退", kind:"sub", badges:["read_file","edit_file","write_file","list_dir"]},
+    {icon:"✦", name:"skill-creator", desc:"skill 创建子 agent。读写 ext/skills/ 目录", kind:"sub", badges:["write_skill","read_skill","list_skills"]},
+  ],
+  skills: [
+    {icon:"🌀", name:"werden", desc:"模糊需求的诘问-试错循环。欲望之物在试错中生成，不被提取。", version:"2.0.0", badges:["dialectic","trial-error"]},
+    {icon:"🔧", name:"skill-creator", desc:"创建和迭代改进 skill。渐进式加载，示例胜过规则。", version:"1.0", badges:["meta-skill"]},
+    {icon:"👁", name:"code-review", desc:"代码审查：找 bug、安全漏洞、性能问题，分级标注。", version:"1.0", badges:["quality"]},
+    {icon:"📐", name:"agent_prompt_methodology", desc:"Agent prompt 方法论：精确角色、工具优先、结构化推理。", version:"1.0", badges:["reference"]},
+  ],
+  tools: [
+    {icon:"🐍", name:"python", desc:"共享命名空间执行 Python。创建变量/操作对象/改 system_prompt。print() 输出返回。", agent:"Prism"},
+    {icon:"🔍", name:"search", desc:"统一搜索。engine=web(Bing) / github(GitHub API) / all(并行)。", agent:"Prism", badges:["web","github"]},
+    {icon:"🔒", name:"edit_file", desc:"锁定文件获取写锁。多 agent 并发安全。", agent:"coder"},
+    {icon:"📝", name:"write_file", desc:"写入文件(需先 edit_file)。走 guarded_open 自动备份。", agent:"coder"},
+    {icon:"📖", name:"read_file", desc:"读项目任意路径文件。", agent:"coder"},
+  ],
+  timeline: [
+    {time:"now", title:"agent 目录化 + tools 声明式列表", desc:"ext/agents/<name>/{agent.yaml, prompt.yaml}, tools 列表替代布尔, 189 tests pass"},
+    {time:"session", title:"steer 插队 + Esc 中断", desc:"agent_loop turn 开始检查 inbox, steer priority=0 插队, _agent_busy 状态跟踪"},
+    {time:"session", title:"文件锁 + coder 子 agent", desc:"acquire_lock/release_lock 全局锁表, coder 有 project_tools(带锁)"},
+    {time:"session", title:"统一 search 工具", desc:"ext/tools/search/ 目录化, web + github 引擎, 延迟注册 provider"},
+    {time:"session", title:"werden skill 移植", desc:"从 ZCode skill-creator-plugin 移植, 适配 prism 目录格式"},
+    {time:"session", title:"TUI 渲染优化", desc:"工具调用精简截断, 子 agent 框线, 圆角边框, 欢迎框"},
+    {time:"session", title:"skill 格式标准化", desc:"ext/skills/<name>/SKILL.md (YAML frontmatter + markdown body)"},
+  ],
+};
+
+// === RENDER ===
+function renderStats() {
+  const stats = [
+    {num: DATA.agents.length, label:"Agents"},
+    {num: DATA.skills.length, label:"Skills"},
+    {num: DATA.tools.length, label:"Tools"},
+    {num: "189", label:"Tests"},
+  ];
+  document.getElementById('stats').innerHTML = stats.map(s =>
+    `<div class="stat"><div class="num">${s.num}</div><div class="label">${s.label}</div></div>`
+  ).join('');
+}
+
+function renderAgents() {
+  document.getElementById('agents-grid').innerHTML = DATA.agents.map(a => `
+    <div class="card" onclick="this.querySelector('.meta').style.display = this.querySelector('.meta').style.display==='flex'?'flex':'flex'">
+      <div class="icon">${a.icon}</div>
+      <div class="name">${a.name} <span class="badge ${a.kind==='main'?'green':'purple'}">${a.kind}</span></div>
+      <div class="desc">${a.desc}</div>
+      <div class="meta">${a.badges.map(b=>`<span class="badge">${b}</span>`).join('')}</div>
+    </div>
+  `).join('');
+}
+
+function renderSkills() {
+  document.getElementById('skills-grid').innerHTML = DATA.skills.map(s => `
+    <div class="card">
+      <div class="icon">${s.icon}</div>
+      <div class="name">${s.name} ${s.version?`<span class="badge">v${s.version}</span>`:''}</div>
+      <div class="desc">${s.desc}</div>
+      ${s.badges?`<div class="meta">${s.badges.map(b=>`<span class="badge purple">${b}</span>`).join('')}</div>`:''}
+    </div>
+  `).join('');
+}
+
+function renderTools() {
+  document.getElementById('tools-grid').innerHTML = DATA.tools.map(t => `
+    <div class="card">
+      <div class="icon">${t.icon}</div>
+      <div class="name">${t.name} <span class="badge green">${t.agent}</span></div>
+      <div class="desc">${t.desc}</div>
+      ${t.badges?`<div class="meta">${t.badges.map(b=>`<span class="badge">${b}</span>`).join('')}</div>`:''}
+    </div>
+  `).join('');
+}
+
+function renderTimeline() {
+  document.getElementById('timeline').innerHTML = DATA.timeline.map(t => `
+    <div class="timeline-item">
+      <div class="timeline-time">${t.time}</div>
+      <div class="timeline-title">${t.title}</div>
+      <div class="timeline-desc">${t.desc}</div>
+    </div>
+  `).join('');
+}
+
+// === TABS ===
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('tab-'+name).classList.add('active');
+}
+
+// === CLOCK ===
+function updateClock() {
+  const d = new Date();
+  document.getElementById('clock').textContent =
+    String(d.getHours()).padStart(2,'0') + ':' +
+    String(d.getMinutes()).padStart(2,'0') + ':' +
+    String(d.getSeconds()).padStart(2,'0');
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// === PARTICLE NETWORK BACKGROUND ===
+const canvas = document.getElementById('bg');
+const ctx = canvas.getContext('2d');
+let W, H, particles = [];
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+class Particle {
+  constructor() {
+    this.x = Math.random()*W;
+    this.y = Math.random()*H;
+    this.vx = (Math.random()-0.5)*0.3;
+    this.vy = (Math.random()-0.5)*0.3;
+    this.r = Math.random()*2 + 0.5;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    if(this.x<0||this.x>W) this.vx*=-1;
+    if(this.y<0||this.y>H) this.vy*=-1;
+  }
+  draw() {
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(6,182,212,0.6)';
+    ctx.fill();
+  }
+}
+
+for(let i=0; i<60; i++) particles.push(new Particle());
+
+function drawConnections() {
+  for(let i=0; i<particles.length; i++) {
+    for(let j=i+1; j<particles.length; j++) {
+      const dx = particles[i].x - particles[j].x;
+      const dy = particles[i].y - particles[j].y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if(dist < 140) {
+        ctx.beginPath();
+        ctx.moveTo(particles[i].x, particles[i].y);
+        ctx.lineTo(particles[j].x, particles[j].y);
+        ctx.strokeStyle = `rgba(139,92,246,${0.15*(1-dist/140)})`;
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+function animate() {
+  ctx.clearRect(0,0,W,H);
+  particles.forEach(p=>{p.update();p.draw();});
+  drawConnections();
+  requestAnimationFrame(animate);
+}
+animate();
+
+// === INIT ===
+renderStats();
+renderAgents();
+renderSkills();
+renderTools();
+renderTimeline();
+</script>
+</body>
+</html>

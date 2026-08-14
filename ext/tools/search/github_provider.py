@@ -14,6 +14,16 @@ import os
 # ── 延迟注册队列(全局, search_hub 加载时消费) ──────────
 _PENDING_PROVIDERS: list = []
 
+# 外发域名白名单(SSRF 防护): query 来自 LLM, 域名钉死
+_ALLOWED_HOSTS = {"api.github.com"}
+
+
+def _assert_allowed_url(url: str) -> None:
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    if parts.scheme != "https" or (parts.hostname or "").lower() not in _ALLOWED_HOSTS:
+        raise ValueError(f"[blocked] 非白名单请求目标: {parts.scheme}://{parts.hostname}")
+
 
 def _github_search(query: str, num_results: int = 5) -> str:
     """GitHub API 搜索仓库。query 直接传给 GitHub Search API。"""
@@ -22,6 +32,7 @@ def _github_search(query: str, num_results: int = 5) -> str:
         + urllib.parse.quote(query)
         + f"&sort=stars&order=desc&per_page={min(num_results, 30)}"
     )
+    _assert_allowed_url(api_url)
 
     headers = {
         "Accept": "application/vnd.github.v3+json",

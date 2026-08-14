@@ -37,7 +37,7 @@ RLM 的本质恰恰是 ③。对照原则 5(无中断,北极星):compact() 是**
 | [cycle.md](cycle.md) | ★认知周期 + READ/WRITE/剪枝 | 确定 |
 | [scribe.md](scribe.md) | TreeScribe 小模型导航搜索树 | 部分 open |
 | [persistence.md](persistence.md) | SQLite Forest 选型 + schema | 确定 |
-| [route.md](route.md) | 落地路线 R0–R6(标确定 vs open) | 确定 |
+| [route.md](route.md) | 落地路线 Phase A–D(Core→Tree→Intuition→Experiment,标确定 vs open) | 确定 |
 
 ## 确定 vs open 总表
 
