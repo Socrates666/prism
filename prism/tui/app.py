@@ -34,7 +34,7 @@ DARK = {
     "accent": Style(fg=_h("8abeb7")), "primary": Style(fg=_h("5f87ff")),
     "border": Style(fg=_h("5f87ff")), "border_accent": Style(fg=_h("00d7ff")),
     # 灰阶阶梯(三语义分离): thinking_text #808080 < muted #8a8a8a < tool_output #9a9a9a
-    # border_muted #6a6a6a 对 page_bg #18181e ≈3.3:1(≥3:1, 失焦输入框边框可辨)
+    # border_muted #6a6a6a 对 page_bg 纯黑 #000000 ≈5.4:1(≥3:1, 失焦输入框边框清晰)
     "border_muted": Style(fg=_h("6a6a6a")),
     "success": Style(fg=_h("b5bd68")), "error": Style(fg=_h("cc6666")),
     "warning": Style(fg=_h("ffff00")), "muted": Style(fg=_h("8a8a8a")),
@@ -46,7 +46,7 @@ DARK = {
     "tool_success_bg": _h("283228"), "tool_error_bg": _h("3c2828"),
     "thinking_bg": _h("282832"), "cognitive_bg": _h("2d2838"),
     "code_bg": _h("1e1e26"),                       # 模型输出代码块背景(比 tool_pending 深, 区隔状态块)
-    "page_bg": Style(fg=_h("18181e")),             # 整页铺底色(RGB 存 fg, _page_rgb() 取)
+    "page_bg": Style(fg=_h("000000")),             # 整页铺底纯黑(用户裁决 2026-08-14, 旧 #18181e 灰蓝)
     # editor_border 不在表内: style() 实时解析(默认 DeepPink / PRISM_INPUT_BORDER=accent)
 }
 LIGHT = {
