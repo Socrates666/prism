@@ -50,15 +50,24 @@ def test_vc1_page_bg_painted():
     assert none_bg == 0, none_bg
 
 
-# [VC2] transcript 圆角边框可见且着色(fg 为 RGB 元组)
-def test_vc2_transcript_border_drawn_and_styled():
+# [VC2] 全帧唯一边框 = 输入框(用户裁决): transcript 无框, ╭ 只出现在 dock 区域且着色
+def test_vc2_only_dock_is_boxed():
+    from prism.tui.widget import layout as _layout
     app = _app()
     buf = app._render_frame(24, 80)
     screen = _screen(buf)
-    assert "╭" in screen and "╰" in screen, "transcript border not drawn"
-    border_cells = [c for row in buf.grid for c in row if c.ch in "╭╮╰╯─│"]
-    assert border_cells and all(isinstance(c.style.fg, tuple) for c in border_cells), \
-        "border unstyled"
+    assert "╭" in screen and "╰" in screen, "输入框边框未绘制"
+    regions = _layout(app._widgets, app._style_for, 24, 80)
+    idx = {(w.id or "").lstrip("#"): regions[i] for i, w in enumerate(app._widgets)}
+    tx0, ty0, tw, th = idx["transcript"]
+    tcells = [c for row in buf.grid[ty0:ty0 + th] for c in row[tx0:tx0 + tw]
+              if not c.cont and c.ch in "╭╮╰╯"]
+    assert not tcells, "transcript 不应有边框(用户裁决: 只留输入框)"
+    dx, dy, dw, dh = idx["dock"]
+    dcells = [c for row in buf.grid[dy:dy + dh] for c in row[dx:dx + dw]
+              if not c.cont and c.ch in "╭╮╰╯"]
+    assert dcells and all(isinstance(c.style.fg, tuple) for c in dcells), \
+        "输入框边框未着色"
 
 
 # [VC3] 闲置空行归零(#current/#status 空=0 行), status 有内容时按需占 1 行

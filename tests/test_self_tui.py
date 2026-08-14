@@ -230,9 +230,9 @@ def test_blackbox_render_is_flat_bands():
     ref = log.tool_start("read_file", "path=config.py")
     log.tool_end(ref, "PORT=8080", False)
     out = app.render_to_string(rows=26, cols=50)
-    # 外框恰两对: transcript 边框(CSS border 生效) + dock 输入框;
-    # transcript 内部不应再出现(扁平色带)
-    assert out.count("╭") == 2 and out.count("╰") == 2
+    # 全帧唯一框 = dock 输入框(transcript 边框已按用户裁决移除);
+    # transcript 内部不应再出现嵌套框(扁平色带)
+    assert out.count("╭") == 1 and out.count("╰") == 1
     # 用户消息 / 工具名 / 结果都在
     assert "读 config.py" in out
     assert "read_file" in out

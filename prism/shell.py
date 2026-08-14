@@ -24,7 +24,7 @@ class PrismApp(App):
 
     CSS = """
 Screen { layout: vertical; }
-#transcript { height: 1fr; border: round $accent; padding: 0 1; }
+#transcript { height: 1fr; padding: 0 1; }
 #current { height: auto; min-height: 0; max-height: 6; padding: 0 1; color: $text; }
 #status { height: auto; min-height: 0; padding: 0 1; color: $accent; }
 #completion { height: auto; min-height: 0; padding: 0 1; }
