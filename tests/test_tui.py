@@ -157,3 +157,54 @@ def test_on_input_changed_slash_space_no_crash():
     app = mount()
     app._on_input_changed("/ ")
     assert True                         # 不崩即可
+
+
+# ── 色彩能力降级链(truecolor → 256 → 单色) ──────────────────────────────
+def test_color_mode_default_truecolor(monkeypatch):
+    """无环境信号 → truecolor(与历史行为一致, 不回退)。"""
+    import prism.tui.markup as m
+    monkeypatch.delenv("PRISM_COLOR", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("COLORTERM", raising=False)
+    monkeypatch.delenv("WT_SESSION", raising=False)
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    monkeypatch.delenv("TERM", raising=False)
+    assert m._detect_color_mode() == 2
+
+
+def test_color_mode_env_overrides(monkeypatch):
+    import prism.tui.markup as m
+    monkeypatch.setenv("PRISM_COLOR", "256")
+    assert m._detect_color_mode() == 1
+    monkeypatch.setenv("PRISM_COLOR", "mono")
+    assert m._detect_color_mode() == 0
+    monkeypatch.setenv("PRISM_COLOR", "truecolor")
+    monkeypatch.setenv("TERM", "xterm-256color")
+    assert m._detect_color_mode() == 2        # 显式强制赢过 TERM
+    monkeypatch.delenv("PRISM_COLOR")
+    monkeypatch.delenv("COLORTERM", raising=False)
+    monkeypatch.delenv("WT_SESSION", raising=False)
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    assert m._detect_color_mode() == 1        # TERM=256color → 降级
+
+
+def test_fg_code_degrades_rgb_by_mode():
+    """RGB 元组: truecolor 出 38;2;..., 256 模式出 38;5;..., 单色出 None。"""
+    import prism.tui.markup as m
+    rgb = (255, 20, 147)                        # DeepPink #ff1493
+    m._COLOR_MODE = 2
+    assert m._fg_code(rgb) == "38;2;255;20;147"
+    m._COLOR_MODE = 1
+    code = m._fg_code(rgb)
+    assert code.startswith("38;5;") and 16 <= int(code[5:]) <= 255
+    m._COLOR_MODE = 0
+    assert m._fg_code(rgb) is None
+    m._COLOR_MODE = 2                            # 复原(模块级状态)
+
+
+def test_rgb_to_256_picks_close_cube_or_gray():
+    import prism.tui.markup as m
+    assert m._rgb_to_256((0, 0, 0)) == 16       # 黑 → 立方体原点
+    assert m._rgb_to_256((255, 255, 255)) == 231  # 白 → 立方体顶点
+    g = m._rgb_to_256((128, 128, 128))          # 中灰 → 灰阶带
+    assert 232 <= g <= 255
