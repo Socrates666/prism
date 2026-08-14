@@ -47,6 +47,18 @@ def list_providers() -> list[str]:
 
 # ── 内置: Bing web 搜索 ───────────────────────────────
 
+# 外发域名白名单: query 来自 LLM, 域名必须钉死(SSRF 防护边界)
+_ALLOWED_HOSTS = {"www.bing.com", "cn.bing.com", "api.github.com", "api.bilibili.com"}
+
+
+def assert_allowed_url(url: str) -> None:
+    """请求前校验 URL: 仅 https + 白名单域名, 拒绝其余(含内网/localhost)。"""
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    if parts.scheme != "https" or (parts.hostname or "").lower() not in _ALLOWED_HOSTS:
+        raise ValueError(f"[blocked] 非白名单请求目标: {parts.scheme}://{parts.hostname}")
+
+
 def _bing_search(query: str, num_results: int = 5) -> str:
     """Bing 搜索, 返回标题+链接+摘要。"""
     headers = {
@@ -57,6 +69,7 @@ def _bing_search(query: str, num_results: int = 5) -> str:
         + requests.utils.quote(query)
         + f"&count={num_results}"
     )
+    assert_allowed_url(url)
     resp = requests.get(url, timeout=15, headers=headers)
     if resp.status_code != 200:
         return f"[error] HTTP {resp.status_code}"

@@ -2,13 +2,13 @@
 
 ## 现状总览(审计, 需周期校准)
 
-> ⚠️ 测试数需周期校准:2026-08-10 审计记 161 passed,实际已增至 **190 passed**(pytest 实跑确认)。本表数字以最新实跑为准。
+> ⚠️ 测试数需周期校准:文档历史记过 161/190/224,现以最新实跑为准(2026-08-14: **329 passed**)。
 
-- **代码**: prism/ 模块(agent/agent_loop/model/router/shell/patch/registry/spawn/memory/prompt/guard/commands/agent_registry + `__init__`); ext/ 已建(commands/skills/tools/prompts)
-- **测试**: **190 passed**(pytest 实跑,2026-08 校准)
-- **已完成**: 阶段 0–13 全 ✓(骨架/TUI/actor/patch/registry/spawn/comms/guard/测试/对齐pi/结构化prompt/持久化/跨会话/运行时接通)
-- **未完成**: 阶段 14(可变 base + 回退,`guard.py` 有 verify_and_revert 脚手架但 PLAN 未勾);daemon(后台进程,开放问题)
-- **提案**: RLM 认知层(见 [rlm/](rlm/)),未实现 —— 含对原则 10/8 的修正方向
+- **代码**: prism/ 模块(agent/agent_loop/model/router/shell/patch/registry/spawn/memory/prompt/guard/commands/agent_registry/cognitive/forest/cog_hooks/cog_intuition/cog_patches + `__init__`); 自研类 pi TUI(tui/, 零 textual); ext/ 已建(commands/skills/tools/prompts)
+- **测试**: **329 passed**(pytest 实跑, 2026-08-14 校准; 含 research 合并的 6 个 prune 测试)
+- **已完成**: 外壳阶段 0–13 全 ✓; **RLM Phase A(core 契约)/ B(SQLiteForest 认知树)已落地**(A1-A2/A4、B1-B5 ✓, 含失败回溯与 research 的 prune 实现+复杂度优化)
+- **进行中**: RLM Phase C(直觉)—— 启发式直觉已焊进 loop, 小模型直觉(C1)/forcing(C3)/延迟账(C4)待做; A3(guard 拦写 flip)待确认
+- **未完成**: 阶段 14(可变 base + 回退)—— **已被 RLM 硬不可变 core 方向取代**; daemon(后台进程,开放问题)
 
 ## 实施状态速查
 
@@ -28,8 +28,11 @@
 | 11 跨会话验证 | ✓ | |
 | 12 运行时接通 | ✓ | |
 | 13 结构化 system prompt | ✓ | |
-| 14 可变 base + 回退 | ☐ 脚手架在 | **将被 RLM 方向(硬不可变 core)取代** |
-| RLM 认知层 | 🟡 提案 | [rlm/](rlm/) |
+| 14 可变 base + 回退 | ☐ 脚手架在 | **已被 RLM 方向(硬不可变 core)取代** |
+| RLM A · core 契约 + 搜索循环 | ✓ | [rlm/route.md](rlm/route.md)(A3 拦写 flip 待确认) |
+| RLM B · SQLiteForest 认知树 | ✓ | [rlm/route.md](rlm/route.md)(含 prune/复杂度优化, research 合并) |
+| RLM C · 直觉系统 | 🟡 启发式已进 loop | [rlm/route.md](rlm/route.md) 小模型 C1/forcing C3/延迟账 C4 待做 |
+| RLM D · 裁决实验 | ☐ | [schedule-validate-A.md](rlm/schedule-validate-A.md) |
 
 ---
 
