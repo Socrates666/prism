@@ -114,19 +114,15 @@ def test_vc6_cursor_themed_no_hardcoded_bg():
         markup.set_color_theme("dark")
 
 
-# [VC7] busy spinner 不 dim 且有 accent 着色
+# [VC7] busy 可见指示: Footer spinner 已随底栏移除, 由 #status 折射中... 承担(真实 emit 路径)
 def test_vc7_spinner_not_dim_and_colored():
     app = _app()
-    app._agent_busy = True
+    app.agent.hooks["emit"]({"type": "agent_start"})
     app._drain()
     buf = app._render_frame(24, 80)
-    braille = set("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
-    spin = [c for row in buf.grid for c in row if c.ch in braille]
-    assert spin, "spinner not rendered"
-    c0 = spin[0]
-    assert not c0.style.dim, "spinner still dimmed"
-    assert isinstance(c0.style.fg, tuple), "spinner has no color"
-    app._agent_busy = False
+    assert "折射中" in _screen(buf), "busy 应有折射中可见指示"
+    app.agent.hooks["emit"]({"type": "agent_end"})
+    app._drain()
 
 
 # [VC8] footer idle 键位提示(/help 帮助 · esc 中断 · ctrl+j 换行)

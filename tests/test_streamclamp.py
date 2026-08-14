@@ -25,7 +25,7 @@ def _screen(app, rows=24, cols=80):
     return "\n".join("".join(c.ch for c in row) for row in buf.grid)
 
 
-# [C1] 长流式: #current 高度被钳制, transcript 不被挤没, dock/footer 不出屏, 末行可见
+# [C1] 长流式: #current 高度被钳制, transcript 不被挤没, dock 不出屏, 末行可见
 def test_c1_long_streaming_clamped_and_tail_visible():
     app = PrismApp(); app.run(headless=True)
     cur = app.query_one("#current")
@@ -36,7 +36,7 @@ def test_c1_long_streaming_clamped_and_tail_visible():
     assert idx["current"][3] <= 8, idx["current"]
     assert idx["transcript"][3] >= 1, idx["transcript"]
     assert idx["dock"][1] + idx["dock"][3] <= 24, idx["dock"]
-    assert idx["footer"][1] + idx["footer"][3] <= 24, idx["footer"]
+    assert "footer" not in idx and "header" not in idx, "顶栏/底栏已移除(用户裁决)"
     screen = "\n".join("".join(c.ch for c in row) for row in buf.grid)
     assert "L59" in screen, "streaming tail not visible"
 
@@ -54,11 +54,11 @@ def test_c2_short_content_not_truncated():
         assert ("S%d" % i) in screen, "short content truncated: S%d" % i
 
 
-# [C3] 空内容闲置态: dock/footer 不出屏(无回归)
+# [C3] 空内容闲置态: dock 不出屏, 无顶栏/底栏回归(无回归)
 def test_c3_idle_no_regression():
     app = PrismApp(); app.run(headless=True)
     app._drain()
     app._render_frame(24, 80)
     idx = _regions(app)
     assert idx["dock"][1] + idx["dock"][3] <= 24, idx["dock"]
-    assert idx["footer"][1] + idx["footer"][3] <= 24, idx["footer"]
+    assert "footer" not in idx and "header" not in idx, "顶栏/底栏已移除(用户裁决)"

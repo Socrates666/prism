@@ -41,7 +41,9 @@ def test_tui_mounts_main_agent_and_widgets():
     assert app.agent.kind == "main"
     assert app.query_one("#transcript") is not None
     assert app.query_one("#dock") is not None
-    assert app.query_one("#footer") is not None       # pi 风格四段式
+    # 顶栏/底栏已移除(用户裁决 2026-08-14): 纯 transcript+current+status+输入区
+    assert app.query_one("#footer") is None, "footer 应已移除"
+    assert app.query_one("#header") is None, "header 应已移除"
 
 
 def test_tui_input_focused_by_default():

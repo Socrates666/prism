@@ -1,7 +1,7 @@
 """prism TUI 套壳 —— 自研 textual 接口相近 TUI(零 textual/rich 依赖)。
 
-布局对齐 piagent(顶到底): Header / Messages(transcript 滚动) / Current(流式)
-/ Editor(accent 边框, Shift+Enter 多行) / Footer(cwd · model · busy)。
+布局(pi 极简, 无顶栏/底栏): Messages(transcript 滚动) / Current(流式)
+/ Editor(聚焦 DeepPink 边框, Shift+Enter 多行)。
 
 @ 路由(原则8)在 on_input_submitted 处理; agent emit 跨线程经 call_from_thread 回主循环。
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .tui import App, Header, Input, RichLog, Static, Footer
+from .tui import App, Input, RichLog, Static
 
 # 内置指令(无 ext 文件的硬编码实现, 见 _builtin_command): 名 → DESC。
 # 与 self.commands 一起构成 all_commands() 单一事实源。
@@ -61,12 +61,12 @@ Screen { layout: vertical; }
 
     # ── 布局 ─────────────────────────────────────────────────────────────
     def compose(self):
-        yield Header(id="header")
+        # 无顶栏/底栏(用户裁决 2026-08-14): Header(◆标题+快捷键提示)与
+        # Footer(cwd·model·thinking 状态)全部移除, 纯 transcript+输入区(pi 极简)
         yield RichLog(id="transcript", wrap=True)
         yield Static(id="current")
         yield Static(id="status")
         yield Input(id="dock", placeholder="@Prism 问事 · /help 指令 · 直接输入跑 Python")
-        yield Footer(id="footer")
 
     # ── 按键(Esc 中断当前 agent run, 不退出 prism) ────────────────────────
     def on_key(self, event) -> None:
