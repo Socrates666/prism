@@ -52,9 +52,10 @@ def test_b3_natural_language_gives_guidance():
 
 
 def test_b4_placeholder_advertises_routes():
-    """空输入时 dock placeholder 须提示三种路由(@Prism / /help / Python)。"""
+    """空输入区无占位提示(用户裁决 2026-08-14): 只留 ❯ 提示符, 路由引导由报错态(B3)承担。"""
     app = PrismApp(); app.run(headless=True)
     dock = app.query_one("#dock")
-    assert dock.placeholder, "placeholder still empty"
+    assert dock.placeholder == "", "placeholder 应为空(用户裁决)"
     screen = _screen(app, 24, 80)
-    assert "@Prism" in screen and "/help" in screen, "placeholder not rendered"
+    assert "❯" in screen, "❯ 提示符缺失"
+    assert "问事" not in screen and "直接输入跑 Python" not in screen, "占位提示残留"

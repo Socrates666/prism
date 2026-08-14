@@ -66,7 +66,7 @@ Screen { layout: vertical; }
         yield RichLog(id="transcript", wrap=True)
         yield Static(id="current")
         yield Static(id="status")
-        yield Input(id="dock", placeholder="@Prism 问事 · /help 指令 · 直接输入跑 Python")
+        yield Input(id="dock")   # 无占位提示(用户裁决 2026-08-14: 输入区只留 ❯)
 
     # ── 按键(Esc 中断当前 agent run, 不退出 prism) ────────────────────────
     def on_key(self, event) -> None:

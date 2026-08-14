@@ -137,7 +137,15 @@ def test_vc7_spinner_not_dim_and_colored():
 
 # [VC8] footer idle 键位提示(/help 帮助 · esc 中断 · ctrl+j 换行)
 def test_vc8_footer_idle_keymap_hint():
+    # 输入区无键位/路由提示(用户裁决 2026-08-14: 只留 ❯); 横幅的 /help 指针不在此列,
+    # 引导由 /help 与报错态(B3)承担
+    from prism.tui.widget import layout as _layout
     app = _app()
     buf = app._render_frame(24, 80)
-    tail = _screen(buf)[-200:]
-    assert "/help" in tail or "帮助" in tail, tail
+    regions = _layout(app._widgets, app._style_for, 24, 80)
+    idx = {(w.id or "").lstrip("#"): regions[i] for i, w in enumerate(app._widgets)}
+    dx, dy, dw, dh = idx["dock"]
+    dock_screen = "\n".join("".join(c.ch for c in row[dx:dx + dw]) for row in buf.grid[dy:dy + dh])
+    assert "❯" in dock_screen, "❯ 提示符缺失"
+    assert "/help" not in dock_screen and "帮助" not in dock_screen \
+        and "问事" not in dock_screen, "输入区不应有提示残留"
