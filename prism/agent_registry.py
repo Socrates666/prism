@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .commands import ext_root
+
 
 def load_agent_config(agent_dir: Path) -> dict | None:
     """加载单个 agent 配置(agent.yaml + prompt.yaml 合并)。"""
@@ -27,10 +29,10 @@ def load_agent_config(agent_dir: Path) -> dict | None:
     return cfg
 
 
-def load_agent_configs(agents_dir: str = "ext/agents") -> list[dict]:
-    """加载所有 agent 配置。"""
+def load_agent_configs(agents_dir: str | None = None) -> list[dict]:
+    """加载所有 agent 配置(agents_dir 缺省 → ext_root(), 不再赌 cwd)。"""
     configs = []
-    p = Path(agents_dir)
+    p = Path(agents_dir) if agents_dir else ext_root() / "agents"
     if not p.is_dir():
         return configs
     for d in sorted(p.iterdir()):
@@ -111,7 +113,7 @@ def restore_agents(app, emit):
                          tool_names=tool_names)
             _apply_prompt_from_config(agent, cfg)
             for skill_name in cfg.get("skills", []):
-                skill_path = Path("ext/skills") / skill_name / "SKILL.md"
+                skill_path = ext_root() / "skills" / skill_name / "SKILL.md"
                 if skill_path.exists():
                     content = skill_path.read_text(encoding="utf-8")
                     agent.prompt.add_skill(skill_name, content)
@@ -120,10 +122,10 @@ def restore_agents(app, emit):
     return main_agent, subs
 
 
-def save_agent_config(name: str, cfg: dict, agents_dir: str = "ext/agents") -> Path:
-    """保存 agent 配置到 ext/agents/<name>/agent.yaml。"""
+def save_agent_config(name: str, cfg: dict, agents_dir: str | None = None) -> Path:
+    """保存 agent 配置到 ext/agents/<name>/agent.yaml(缺省与加载同一 ext_root)。"""
     import yaml as _yaml
-    agent_dir = Path(agents_dir) / name
+    agent_dir = (Path(agents_dir) if agents_dir else ext_root() / "agents") / name
     agent_dir.mkdir(parents=True, exist_ok=True)
     fpath = agent_dir / "agent.yaml"
     fpath.write_text(

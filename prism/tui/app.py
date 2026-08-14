@@ -11,9 +11,10 @@ from __future__ import annotations
 import queue as _q
 import threading
 import time
+from dataclasses import replace
 from typing import Any, Callable
 
-from .markup import Style
+from .markup import Style, set_color_theme
 from .buffer import Buffer, render_diff, render_plain
 from .css import parse_css, ComputedStyle, Stylesheet
 from .widget import Widget, layout
@@ -31,34 +32,40 @@ def _h(s: str):
 DARK = {
     "accent": Style(fg=_h("8abeb7")), "primary": Style(fg=_h("5f87ff")),
     "border": Style(fg=_h("5f87ff")), "border_accent": Style(fg=_h("00d7ff")),
-    "border_muted": Style(fg=_h("505050")),
+    # 灰阶阶梯(三语义分离): thinking_text #808080 < muted #8a8a8a < tool_output #9a9a9a
+    # border_muted #6a6a6a 对 page_bg #18181e ≈3.3:1(≥3:1, 失焦输入框边框可辨)
+    "border_muted": Style(fg=_h("6a6a6a")),
     "success": Style(fg=_h("b5bd68")), "error": Style(fg=_h("cc6666")),
-    "warning": Style(fg=_h("ffff00")), "muted": Style(fg=_h("808080")),
+    "warning": Style(fg=_h("ffff00")), "muted": Style(fg=_h("8a8a8a")),
     "dim": Style(fg=_h("666666")), "text": Style(fg=_h("d4d4d4")),
     "thinking_text": Style(fg=_h("808080"), italic=True),
-    "user": Style(fg=_h("d4d4d4")), "tool_output": Style(fg=_h("808080")),
+    "user": Style(fg=_h("d4d4d4")), "tool_output": Style(fg=_h("9a9a9a")),
     "custom_label": Style(fg=_h("9575cd")), "md_heading": Style(fg=_h("f0c674")),
     "user_bg": _h("343541"), "tool_pending_bg": _h("282832"),
     "tool_success_bg": _h("283228"), "tool_error_bg": _h("3c2828"),
     "thinking_bg": _h("282832"), "cognitive_bg": _h("2d2838"),
-    "page_bg": _h("18181e"),
-    "editor_border": Style(fg=_h("ff1493")),   # DeepPink: 输入框边框(亮粉深一点)
+    "code_bg": _h("1e1e26"),                       # 模型输出代码块背景(比 tool_pending 深, 区隔状态块)
+    "page_bg": Style(fg=_h("18181e")),             # 整页铺底色(RGB 存 fg, _page_rgb() 取)
+    "editor_border": Style(fg=_h("8abeb7")),   # 输入框边框随 accent(青灰), 聚焦/失焦只差明度
 }
 LIGHT = {
     "accent": Style(fg=_h("5a8080")), "primary": Style(fg=_h("547da7")),
     "border": Style(fg=_h("547da7")), "border_accent": Style(fg=_h("547da7")),
-    "border_muted": Style(fg=_h("b0b0b0")),
+    # 灰阶阶梯(暗主题镜像, 越重要越深): tool_output #565656 < muted #616161 < thinking_text #6c6c6c
+    # border_muted #909090 对 page_bg #ffffff ≈3.2:1(≥3:1)
+    "border_muted": Style(fg=_h("909090")),
     "success": Style(fg=_h("588458")), "error": Style(fg=_h("aa5555")),
-    "warning": Style(fg=_h("9a7326")), "muted": Style(fg=_h("6c6c6c")),
+    "warning": Style(fg=_h("9a7326")), "muted": Style(fg=_h("616161")),
     "dim": Style(fg=_h("767676")), "text": Style(fg=_h("1f2328")),
     "thinking_text": Style(fg=_h("6c6c6c"), italic=True),
-    "user": Style(fg=_h("1f2328")), "tool_output": Style(fg=_h("6c6c6c")),
+    "user": Style(fg=_h("1f2328")), "tool_output": Style(fg=_h("565656")),
     "custom_label": Style(fg=_h("9575cd")), "md_heading": Style(fg=_h("9a7326")),
     "user_bg": _h("e8e8e8"), "tool_pending_bg": _h("e8e8f0"),
     "tool_success_bg": _h("e8f0e8"), "tool_error_bg": _h("f0e8e8"),
     "thinking_bg": _h("e8e8f0"), "cognitive_bg": _h("ede7f6"),
-    "page_bg": _h("ffffff"),
-    "editor_border": Style(fg=_h("d63384")),   # 浅色主题用深玫红
+    "code_bg": _h("f0f0f5"),                       # 浅色版代码块背景
+    "page_bg": Style(fg=_h("ffffff")),             # 整页铺底色(RGB 存 fg, _page_rgb() 取)
+    "editor_border": Style(fg=_h("5a8080")),   # 浅色版 accent(随主题, 不用玫红)
 }
 
 
@@ -67,7 +74,8 @@ class App:
     TITLE: str = "App"
 
     def __init__(self) -> None:
-        self.theme: str = "dark"
+        self._theme: str = "dark"
+        set_color_theme("dark")   # 同步 markup 全局色表(防御同进程前序 app 残留)
         self._themes: dict[str, dict] = {"dark": DARK, "light": LIGHT}
         self.available_themes: dict[str, dict] = self._themes
         self._widgets: list[Widget] = []
@@ -101,8 +109,21 @@ class App:
         pass
 
     # ── 主题 / 样式 ──────────────────────────────────────────────────────
+    @property
+    def theme(self) -> str:
+        return self._theme
+
+    @theme.setter
+    def theme(self, name: str) -> None:
+        self._theme = name
+        set_color_theme(name)   # markup 命名色随主题(浅色下重映射语义 4 色)
+
     def style(self, token: str) -> Style:
-        return self._themes.get(self.theme, DARK).get(token, Style())
+        return self._themes.get(self._theme, DARK).get(token, Style())
+
+    def _page_rgb(self):
+        """page_bg token 的 RGB(整页铺底色, 缺 token 时返回 None 不铺)。"""
+        return self.style("page_bg").fg
 
     # ── 跨线程调度 ───────────────────────────────────────────────────────
     def call_from_thread(self, fn: Callable, *args: Any, **kw: Any) -> None:
@@ -147,6 +168,17 @@ class App:
             self._focusable[0].focus()
 
     def _input_submitted(self, event) -> None:
+        # 输入历史: 提交即记录(连续重复去重), 供单行 up/down 回溯(存于 Input 自身)
+        inp = getattr(event, "input", None)
+        v = getattr(event, "value", "")
+        if inp is not None and getattr(inp, "history", None) is not None:
+            if v.strip() and (not inp.history or inp.history[-1] != v):
+                inp.history.append(v)
+            inp._hist_idx = len(inp.history)
+        # 补全浮层残留: Enter 提交不走 _on_input_changed, 浮层不会自关 → 提交即关
+        hide = getattr(self, "_hide_cmd_overlay", None)
+        if callable(hide):
+            hide()
         self.on_input_submitted(event)
 
     # ── 主循环 ───────────────────────────────────────────────────────────
@@ -213,11 +245,21 @@ class App:
 
     def _dispatch_key(self, key) -> None:
         k = key.key
-        # Ctrl+C: 清空 / 双击退出(pi 同款)
+        # Ctrl+C: busy→中断(不清输入) / 有文→清空+反馈 / 空→双击退出(pi 同款三分支)
         if k == "ctrl+c":
+            log = self.query_one("#transcript")
+            from .widgets import RichLog
+            if self._agent_busy and getattr(self, "agent", None) is not None:
+                self.agent.stop()
+                if isinstance(log, RichLog):
+                    log.write("[yellow]⏹ 已中断[/yellow]")
+                self.request_render()
+                return
             inp = self._focusable[self._focus_idx] if self._focus_idx >= 0 else None
             if inp is not None and getattr(inp, "value", ""):
                 inp.clear()
+                if isinstance(log, RichLog):
+                    log.write("[dim]（已清空）[/dim]")
                 self.request_render()
                 return
             now = time.time()
@@ -225,10 +267,8 @@ class App:
                 self._quit.set()
                 return
             self._last_ctrlc = now
-            log = self.query_one("#transcript")
-            from .widgets import RichLog
             if isinstance(log, RichLog):
-                log.write("[dim](Ctrl+C again to quit)[/dim]")
+                log.write("[dim]（再按一次 Ctrl+C 退出）[/dim]")
             self.request_render()
             return
         # Tab: dock 聚焦时交 on_tab 钩子(@agent 填充); 否则循环焦点
@@ -237,6 +277,21 @@ class App:
             if not self.on_tab(inp):
                 self._cycle_focus()
             return
+        # 补全浮层激活: up/down 归补全导航(不滚 transcript); Escape 关浮层不透传
+        # (与 busy 中断冲突时浮层优先 —— 先关浮层, 再按一次 Esc 才中断)
+        comp = getattr(self, "_completion_active", None)
+        if callable(comp) and comp():
+            mv = getattr(self, "_completion_move", None)
+            if k in ("up", "down") and callable(mv):
+                mv(-1 if k == "up" else 1)
+                self.request_render()
+                return
+            if k == "escape":
+                hide = getattr(self, "_hide_cmd_overlay", None)
+                if callable(hide):
+                    hide()
+                self.request_render()
+                return
         # 滚动键 → transcript(即便焦点在 Input)
         log = self.query_one("#transcript")
         from .widgets import RichLog
@@ -245,20 +300,14 @@ class App:
                 log.scroll_up(max(1, self._rows // 2)); self.request_render(); return
             if k == "pagedown":
                 log.scroll_down(max(1, self._rows // 2)); self.request_render(); return
-            if k == "home":
-                log.scroll_home(); self.request_render(); return
-            if k == "end":
-                log.scroll_end(); self.request_render(); return
-            # up/down: 输入框单行时滚 transcript(多行时光标给 Input, 不破坏多行编辑)
-            if k in ("up", "down"):
-                try:
-                    dock = self.query_one("#dock")
-                    if "\n" not in (dock.value or ""):
-                        (log.scroll_up if k == "up" else log.scroll_down)(3)
-                        self.request_render(); return
-                except Exception:
-                    pass
-        # 先给焦点 widget
+            if k in ("home", "end"):
+                # 多行编辑 → 行首/行尾归输入框; 单行/未吃掉 → 回退 transcript 滚动
+                w = self._focusable[self._focus_idx] if self._focus_idx >= 0 else None
+                if w is not None and "\n" in (getattr(w, "value", "") or "") and w.on_key(key):
+                    self.request_render(); return
+                (log.scroll_home if k == "home" else log.scroll_end)()
+                self.request_render(); return
+        # 其余先给焦点 widget(up/down: 补全导航已在上拦, 此处单行翻历史/多行移行)
         if self._focus_idx >= 0 and self._focusable[self._focus_idx].on_key(key):
             self.request_render()
             return
@@ -292,7 +341,14 @@ class App:
             if h <= 0:
                 continue
             try:
-                w.draw(buf, x, y, w_, h)
+                cs = styles(w)
+                if cs.border and w_ >= 2 and h >= 2:
+                    # CSS border 不再是死代码: 先画框, widget 内容区内缩 2 格
+                    buf.box(x, y, w_, h, border_style=self.style(cs.border_token))
+                    if w_ > 2 and h > 2:
+                        w.draw(buf, x + 1, y + 1, w_ - 2, h - 2)
+                else:
+                    w.draw(buf, x, y, w_, h)
             except Exception:  # noqa
                 pass
         # 浮层(overlay): 主布局画完后叠在上方(后画的覆盖) —— completion popup 等
@@ -301,6 +357,14 @@ class App:
                 ov["widget"].draw(buf, ov["x"], ov["y"], ov["w"], ov["h"])
             except Exception:  # noqa
                 pass
+        # page_bg 全铺底: widget 多数只写 fg(bg=None 透传终端默认底, 浅暗错配全糊),
+        # 帧尾给所有无底色 cell 补 page_bg —— 消息块/光标等显式 bg 原样保留
+        page = self._page_rgb()
+        if page is not None:
+            for row in buf.grid:
+                for c in row:
+                    if c.style.bg is None:
+                        c.style = replace(c.style, bg=page)
         return buf
 
     def show_overlay(self, widget, x: int, y: int, w: int, h: int) -> int:

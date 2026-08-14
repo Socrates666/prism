@@ -211,7 +211,9 @@ def test_richlog_many_entries_perf():
     for i in range(2000):
         log.write(f"line{i}")
     units = log._ensure_units(40)
-    assert len(units) == 2000
+    # 惰性物化: 只建尾窗(贴底渲染够用), 不再全量 2000(REQ-G6 P2)
+    assert 0 < len(units) <= 800
+    assert len(log.entries) == 2000
 
 
 def test_richlog_scroll_bounds_when_empty():

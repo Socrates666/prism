@@ -131,8 +131,8 @@ class Terminal:
         if IS_WIN:
             self._setup_win()
         self._rows, self._cols = self.size()
-        # alt screen + 隐藏光标 + 清屏
-        self.write("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H")
+        # alt screen + 隐藏光标 + 清屏 + 开启 bracketed paste(?2004)
+        self.write("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?2004h")
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
         return self
@@ -150,7 +150,7 @@ class Terminal:
             pass
         if self._thread:
             self._thread.join(timeout=0.2)
-        self.write("\x1b[?25h\x1b[?1049l")
+        self.write("\x1b[?25h\x1b[?2004l\x1b[?1049l")
         if IS_WIN:
             self._teardown_win()
         else:
@@ -281,28 +281,72 @@ _VT_CSI = {
 }
 
 
+# ponytail: 跨 read chunk 的 bracketed paste 状态用模块级 dict。
+# POSIX 单读线程单调用者(_read_loop_posix), 无并发; 多终端实例并存时再改成 per-Terminal 解析器。
+# Windows 路径经 ReadConsoleInputW 拿结构化事件, 不走 VT 解析, 故 paste 在 Win 上暂不生效(TODO)。
+_PASTE = {"active": False, "buf": ""}
+
+
 def _parse_vt(data: bytes) -> list[Key]:
     out: list[Key] = []
     text = data.decode("utf-8", "replace")
     i = 0
     while i < len(text):
+        # bracketed paste 结束标记: 把累积内容整段产出一个 __paste__ key(段内 \r\n 不变 enter)
+        if text.startswith("\x1b[201~", i):
+            if _PASTE["active"]:
+                out.append(Key(key="__paste__", char=_PASTE["buf"]))
+                _PASTE["active"] = False
+                _PASTE["buf"] = ""
+            i += len("\x1b[201~")
+            continue
+        # 进入 paste: 后续字节原样累积, 不逐字符解释(嵌套 start 视为重开, 丢弃旧 buf)
+        if text.startswith("\x1b[200~", i):
+            _PASTE["active"] = True
+            _PASTE["buf"] = ""
+            i += len("\x1b[200~")
+            continue
+        if _PASTE["active"]:
+            _PASTE["buf"] += text[i]
+            i += 1
+            continue
         ch = text[i]
         if ch == "\x1b" and i + 1 < len(text) and text[i + 1] == "[":
             j = i + 2
             while j < len(text) and text[j] not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ~":
                 j += 1
             seq = text[i + 2:j + 1] if j < len(text) else text[i + 2:]
-            name = _VT_CSI.get(seq.rstrip("0123456789;") and seq or seq, "")
+            name = _VT_CSI.get(seq, "")
             # 末字母映射
             if not name and seq and seq[-1] in _VT_CSI:
                 name = _VT_CSI[seq[-1]]
-            out.append(Key(key=name or f"csi_{seq}", char=""))
+            # 修饰参数: \x1b[1;5C → params[1]=5, mod=int-1 按位 1=shift 2=alt 4=ctrl
+            shift = alt = ctrl = False
+            params = seq[:-1].split(";") if seq else []
+            if len(params) > 1 and params[1].isdigit():
+                mod = int(params[1]) - 1
+                shift, alt, ctrl = bool(mod & 1), bool(mod & 2), bool(mod & 4)
+            out.append(Key(key=name or f"csi_{seq}", char="",
+                           shift=shift, alt=alt, ctrl=ctrl))
             i = j + 1
         elif ch == "\x1b":
-            out.append(Key(key="escape", char=""))
-            i += 1
+            if i + 1 < len(text) and text[i + 1] == "\r":
+                # \x1b\r = 部分终端的 Shift+Enter(须在 Alt 合并前拦下, 拆开会先误中断再误提交)
+                out.append(Key(key="enter", char="", shift=True))
+                i += 2
+            elif i + 1 < len(text) and text[i + 1].isprintable():
+                # \x1b+可打印字符 = Alt+X, 合并成单 key(多余 escape 会误触发 agent 中断)
+                out.append(Key(key=text[i + 1], char=text[i + 1], alt=True))
+                i += 2
+            else:
+                out.append(Key(key="escape", char=""))
+                i += 1
         elif ch == "\r":
             out.append(Key(key="enter", char=""))
+            i += 1
+        elif ch == "\n":
+            # 0x0A=Ctrl+J: 不当 enter, 否则非 bracketed 终端多行粘贴兜底会逐行提交
+            out.append(Key(key="ctrl+j", char=""))
             i += 1
         elif ch == "\t":
             out.append(Key(key="tab", char=""))

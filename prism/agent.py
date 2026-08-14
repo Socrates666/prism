@@ -309,6 +309,9 @@ class Agent:
                 try:
                     h(msg)
                 except Exception as e:
+                    # 双保险: 补发 agent_end 归位 busy(正常路径 run_agent_loop 的
+                    # finally 已发, 此时为重复事件, 由 shell 侧引用计数去重)。
+                    self.emit({"type": "agent_end"})
                     self.emit({"type": "error", "error": f"{type(e).__name__}: {e}"})
 
     def _h_run(self, msg: dict) -> None:

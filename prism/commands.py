@@ -11,9 +11,25 @@
 """
 from __future__ import annotations
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from typing import Callable
+
+
+def ext_root() -> Path:
+    """ext/ 根解析: PRISM_EXT_DIR 覆盖 → 包根(prism/ 上级=仓库/安装根)优先 → cwd 兜底。
+
+    旧的相对 cwd 路径在换目录启动时让指令/agent 配置静默蒸发(REQ-G5 PROBLEM-3),
+    找不到时由 shell.on_mount 写警告。
+    """
+    env = os.environ.get("PRISM_EXT_DIR")
+    if env:
+        return Path(env)
+    pkg_root = Path(__file__).resolve().parent.parent
+    if (pkg_root / "ext").is_dir():
+        return pkg_root / "ext"
+    return Path("ext")                     # cwd 兜底(有无由调用方检查并警告)
 
 
 def load_commands(ext_dir, emit: Callable[[dict], None] | None = None) -> dict:

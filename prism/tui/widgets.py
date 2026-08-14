@@ -26,17 +26,18 @@ class Header(Widget):
 
 # ── RichLog(可滚动 transcript, pi 风格块) ───────────────────────────────────
 class _LineUnit:
-    """一行(已 wrap)。"""
-    def __init__(self, row): self.row = row; self.height = 1
+    """一行(已 wrap)。e = 所属 entry 索引(滚动内容锚用)。"""
+    def __init__(self, row, e=0): self.row = row; self.height = 1; self.e = e
     def draw(self, buf, x, y, w):
         buf.write_segments(x + 1, y, self.row)   # 1 格左缩进(对齐 pi outputPad)
 
 
 class _BlockUnit:
     """pi 风格块: 全宽背景色带 + 1 格留白, 零边框字符(对齐 pi-tui Box)。"""
-    def __init__(self, b, body_rows):
+    def __init__(self, b, body_rows, e=0):
         self.b = b; self.body_rows = body_rows
         self.height = 2 + max(1, len(body_rows))   # 上下各 1 行 padding
+        self.e = e
     def draw(self, buf, x, y, w):
         b = self.b; h = self.height; bg = b.get("bg")
         if bg is not None:
@@ -49,7 +50,7 @@ class _BlockUnit:
 class RichLog(Widget):
     """滚动日志区, pi 风格块状条目。
 
-    - write(markup)         普通行(向后兼容)
+    - write(markup)         普通行 + ``` 代码块识别(围栏行不渲染, 代码段走背景块)
     - user(text)            用户消息块(背景)
     - tool_start(...)→ref   工具调用 pending 块, 返回可变引用
     - tool_end(ref, ...)    升级为 success/error 块
@@ -58,15 +59,24 @@ class RichLog(Widget):
     """
     can_focus = False
 
+    # 物化窗口 unit 预算: 任何时刻 _units 有界(≈ 一屏的若干倍), resize/写入只重建窗口
+    _WIN_UNITS = 800
+
     def __init__(self, id: str | None = None, wrap: bool = True) -> None:
         super().__init__(id)
         self.wrap = wrap
         self.entries: list = []          # [("line", markup)] 或 [("block", dict)]
+        self.max_entries = 2000          # 容量上限: 超限从头部丢弃(长会话内存有界)
         self._follow = True              # 贴底跟随
-        self._top = 0                    # 顶部跳过的 unit 数
+        self._top = 0                    # 顶部跳过的 unit 数(_units 窗口内索引)
         self._cache_iw = -1
-        self._units: list = []
+        self._units: list = []           # 物化窗口: 只覆盖 entries 的 [_w_e0, _w_e1)
+        self._w_e0 = 0                   # 窗口覆盖的首 entry 索引
+        self._w_e1 = 0                   # 窗口覆盖的末 entry 索引(开区间)
+        self._w_tail = True              # 窗口是否触达真实尾部(贴底渲染前提)
         self._last_ih = 24
+        self._code_open = False        # ``` 围栏开关(跨 write: 流式中途 flush 的半块后续续上)
+        self._code_buf: list[str] = []
 
     # ── 内容 API ────────────────────────────────────────────────────────
     @property
@@ -85,17 +95,50 @@ class RichLog(Widget):
     def _invalidate(self) -> None:
         self._cache_iw = -1
 
+    def _append(self, item) -> None:
+        # 统一 append 入口(write/user/tool_start/代码块全走这): 超容量从头部丢弃,
+        # 窗口/锚索引随平移, 视口顶 unit 对象不变(下次重建按锚重定位, 不漂移)。
+        self.entries.append(item)
+        drop = len(self.entries) - self.max_entries
+        if drop > 0:
+            del self.entries[:drop]
+            self._w_e0 = max(0, self._w_e0 - drop)
+            self._w_e1 = max(0, self._w_e1 - drop)
+            for u in self._units:
+                u.e -= drop
+
     def write(self, markup: str) -> None:
-        for piece in (markup or "").split("\n"):
-            self.entries.append(("line", piece))
+        # 最小 markdown 代码块识别: 按 ``` 围栏行切分, 围栏行本身不渲染;
+        # 代码段走背景块(与正文视觉区隔), 正文段照常逐行。
+        # 围栏状态跨 write 保持 —— 流式中途被截断 flush 的半块, 余下文本仍按代码续上。
+        # 注意: 代码体按调用方已转义的原文直接渲染(项目惯例: shell 侧 .replace("[", "\\["))。
+        for ln in (markup or "").split("\n"):
+            if ln.lstrip().startswith("```"):       # 围栏行: 只切换状态, 不进 entries
+                self._flush_code()
+                self._code_open = not self._code_open
+            elif self._code_open:
+                self._code_buf.append(ln)
+            else:
+                self._append(("line", ln))
+        self._flush_code()     # 未闭合围栏(流式只出现开头 ```): 半块也照常渲染, 不吞正文
         self._invalidate()
 
+    def _flush_code(self) -> None:
+        # 代码段 → pi 风格背景块(复用 _BlockUnit), 不按词折行(保留缩进, 超长右侧裁剪)
+        if self._code_buf:
+            self._append(("block", {
+                "bg": self._bg("code_bg"), "body": self._code_buf, "nowrap": True}))
+            self._code_buf = []
+
     def clear(self) -> None:
-        self.entries.clear(); self._invalidate()
+        self.entries.clear()
+        self._code_open = False; self._code_buf = []
+        self._units = []; self._w_e0 = self._w_e1 = 0; self._w_tail = True
+        self._invalidate()
 
     def user(self, text: str) -> None:
         # pi: 纯背景色带, 无标题无边框
-        self.entries.append(("block", {
+        self._append(("block", {
             "bg": self._bg("user_bg"), "body": [text],
         }))
         self._invalidate()
@@ -104,7 +147,7 @@ class RichLog(Widget):
         # 行动: 中文阶段标签 + 工具名 + args, pi 风格背景色带
         head = f"[cyan]行动[/cyan] [bold]▸ {name}[/bold]" + (f"  [dim]{args_str}[/dim]" if args_str else "")
         b = {"name": name, "bg": self._bg("tool_pending_bg"), "body": [head]}
-        self.entries.append(("block", b))
+        self._append(("block", b))
         self._invalidate()
         return b
 
@@ -142,24 +185,113 @@ class RichLog(Widget):
     def _disp_w(self) -> int:
         return self._cache_iw if self._cache_iw > 0 else 76
 
-    def _ensure_units(self, iw: int) -> list:
-        if iw != self._cache_iw:
-            self._cache_iw = iw
-            self._units = []
+    def _entry_units(self, kind, payload, iw: int, e: int) -> list:
+        # 单个 entry → unit 列表(每 entry 至少 1 个 unit, 索引单调)
+        us = []
+        if kind == "line":
+            segs = parse_markup(payload)
+            rows = wrap_segments(segs, max(1, iw - 2)) if self.wrap else [segs]
+            for row in (rows or [[]]):
+                us.append(_LineUnit(row, e))
+        else:
             body_iw = max(1, iw - 2)   # 全宽色带: 左右各 1 格留白, 无边框
-            for kind, payload in self.entries:
-                if kind == "line":
-                    segs = parse_markup(payload)
-                    rows = wrap_segments(segs, max(1, iw - 2)) if self.wrap else [segs]
-                    for row in (rows or [[]]):
-                        self._units.append(_LineUnit(row))
-                else:
-                    body_rows = []
-                    for ln in payload["body"]:
-                        for sub in ln.split("\n"):       # 多行内容按行拆(对齐 write)
-                            body_rows += wrap_segments(parse_markup(sub), body_iw) or [[]]
-                    self._units.append(_BlockUnit(payload, body_rows))
+            body_rows = []
+            for ln in payload["body"]:
+                for sub in ln.split("\n"):       # 多行内容按行拆(对齐 write)
+                    segs = parse_markup(sub)
+                    if payload.get("nowrap"):    # 代码块: 不折行(保留缩进, 超长右侧裁剪)
+                        body_rows.append(segs)
+                    else:
+                        body_rows += wrap_segments(segs, body_iw) or [[]]
+            us.append(_BlockUnit(payload, body_rows, e))
+        return us
+
+    def _build_tail(self, iw: int) -> None:
+        # 尾窗: 从末尾往回物化 ~3 屏 + 滚动余量(贴底渲染 / 向上滚动起步), 不再全量重建
+        need = self._last_ih * 3 + 64
+        us: list = []
+        acc = 0
+        e = len(self.entries) - 1
+        while e >= 0 and acc < need:
+            es = self._entry_units(*self.entries[e], iw, e)
+            us = es + us
+            acc += sum(u.height for u in es)
+            e -= 1
+        self._units = us
+        self._w_e0, self._w_e1 = e + 1, len(self.entries)
+        self._w_tail = True
+
+    def _build_at(self, iw: int, e0: int) -> None:
+        # 锚窗: 从 e0 向前物化到预算上限(scroll_home / 内容锚重定位), _top 归锚首行
+        us: list = []
+        e = e0
+        n = len(self.entries)
+        while e < n and len(us) < self._WIN_UNITS:
+            us += self._entry_units(*self.entries[e], iw, e)
+            e += 1
+        self._units = us
+        self._w_e0, self._w_e1 = e0, e
+        self._w_tail = False
+        self._top = 0
+
+    def _ensure_units(self, iw: int) -> list:
+        # 贴底必须拿到尾窗: 缓存是锚窗时(如 scroll_home 后 scroll_end)强制重建
+        if iw == self._cache_iw and not (self._follow and not self._w_tail):
+            return self._units
+        # 重建窗口。贴底 → 尾窗; 否则按内容锚(视口顶 unit 所属 entry + entry 内偏移)
+        # 重定位 —— 宽度一变 unit 总数漂移, 同一 _top 会指向完全不同内容(锚点漂移)。
+        ve = off = None
+        if not self._follow and self._units:
+            t = min(max(self._top, 0), len(self._units) - 1)
+            ve = self._units[t].e
+            i0 = next((i for i, u in enumerate(self._units) if u.e == ve), 0)
+            off = max(0, t - i0)
+        self._cache_iw = iw
+        if ve is None:
+            self._build_tail(iw)
+        else:
+            self._build_at(iw, min(max(ve, 0), max(0, len(self.entries) - 1)))
+            if off:   # 尽量保住 entry 内行偏移(±几行内, 锚 entry 内容仍在视口)
+                j = next((i for i, u in enumerate(self._units) if u.e == ve), 0)
+                cnt = sum(1 for u in self._units if u.e == ve)
+                self._top = min(j + min(off, cnt - 1), max(0, len(self._units) - 1))
         return self._units
+
+    def _extend_up(self, iw: int) -> None:
+        # 视口顶滚出窗口头: 向上增补 ~2 屏物化; 预算满时先回收窗口尾(远端不可见区)
+        if len(self._units) >= self._WIN_UNITS:
+            k = max(0, self._top + self._last_ih + 64)
+            if k < len(self._units):
+                self._w_e1 = self._units[k - 1].e + 1 if k > 0 else self._w_e0
+                self._units = self._units[:k]
+        add: list = []
+        acc = 0
+        e = self._w_e0 - 1
+        while e >= 0 and acc < self._last_ih * 2 + 16:
+            es = self._entry_units(*self.entries[e], iw, e)
+            add = es + add
+            acc += sum(u.height for u in es)
+            e -= 1
+        self._units = add + self._units
+        self._top += len(add)            # 头插平移: _top 指向同一内容
+        self._w_e0 = e + 1
+
+    def _extend_down(self, iw: int) -> None:
+        # 视口顶滚出窗口尾: 向下增补 ~2 屏物化; 预算满时先回收窗口头(远端不可见区)
+        if len(self._units) >= self._WIN_UNITS:
+            k = self._top - self._last_ih - 64
+            if k > 0:
+                self._w_e0 = self._units[k].e
+                self._units = self._units[k:]
+                self._top -= k           # 头部裁剪平移: _top 指向同一内容
+        acc = 0
+        e = self._w_e1
+        while e < len(self.entries) and acc < self._last_ih * 2 + 16:
+            es = self._entry_units(*self.entries[e], iw, e)
+            self._units += es
+            acc += sum(u.height for u in es)
+            e += 1
+        self._w_e1 = e
 
     def _bottom_start(self, ih: int) -> int:
         units = self._ensure_units(self._disp_w())
@@ -172,16 +304,27 @@ class RichLog(Widget):
         if self._follow:
             self._follow = False
             self._top = self._bottom_start(self._last_ih)
-        self._top = max(0, self._top - n)
+        self._top -= n
+        iw = self._disp_w()
+        while self._top < 0 and self._w_e0 > 0:
+            self._extend_up(iw)
+        if self._top < 0:
+            self._top = 0
 
     def scroll_down(self, n: int = 3) -> None:
         self._follow = False
         self._top += n
-        if self._top >= len(self._ensure_units(self._disp_w())):
+        iw = self._disp_w()
+        units = self._ensure_units(iw)
+        while self._top >= len(units) and self._w_e1 < len(self.entries):
+            self._extend_down(iw)
+            units = self._units
+        if self._top >= len(units):
             self._follow = True
 
     def scroll_home(self) -> None:
-        self._follow = False; self._top = 0
+        self._follow = False
+        self._build_at(self._disp_w(), 0)
 
     def scroll_end(self) -> None:
         self._follow = True
@@ -217,19 +360,34 @@ class Static(Widget):
     def update(self, content: str) -> None:
         self.content = content
 
+    def _wrap_rows(self, iw: int) -> list:
+        # \n 是硬断行(对齐 RichLog): 先按行拆, 再各自软折行, 否则整篇被当成一条流贪婪折叠。
+        rows: list = []
+        for piece in self.content.split("\n"):
+            rows += wrap_segments(parse_markup(piece), iw) or [[]]
+        return rows or [[]]
+
     def measure(self, width: int) -> int:
+        # 空内容不占行(闲置时 #current/#status 归零, 不再各浪费 1 行纯空白)
+        if not self.content.strip():
+            return 0
         iw = max(1, width - 2)
-        rows = wrap_segments(parse_markup(self.content), iw) or [[]]
-        return max(1, len(rows))
+        return max(1, len(self._wrap_rows(iw)))
 
     def draw(self, buf, x, y, w, h) -> None:
         iw = max(1, w - 2)
-        rows = wrap_segments(parse_markup(self.content), iw) or [[]]
-        text_style = self.app.style("thinking_text")
+        rows = self._wrap_rows(iw)
+        # 文本色读 CSS color 声明(#current → $text 正文色, #status → $accent),
+        # 不再写死 thinking_text —— 正在生成的主回答不该比历史还弱
+        cs = self.app._style_for(self) if self.app else None
+        tok = (cs.color_token if cs else "") or "text"
+        text_style = self.app.style(tok) if self.app else Style()
+        # 流式贴底: 内容超过 h 行时只画末尾 h 行, 保证最新内容可见
+        off = max(0, len(rows) - h)
         for r in range(h):
-            if r >= len(rows):
+            if r + off >= len(rows):
                 break
-            segs = [(t, text_style.merge(s)) for t, s in rows[r]]
+            segs = [(t, text_style.merge(s)) for t, s in rows[r + off]]
             buf.write_segments(x + 1, y + r, segs)
 
 
@@ -311,6 +469,9 @@ class Input(Widget):
         self.value = ""
         self.pos = 0
         self.placeholder = placeholder
+        self.history: list[str] = []   # 输入历史(App._input_submitted 提交时记录)
+        self._hist_idx = 0             # 历史游标: len(history) = 实时输入位
+        self._draft = ""               # 离开实时位时暂存草稿(down 回底恢复)
 
     def measure(self, width: int) -> int:
         nlines = max(1, self.value.count("\n") + 1)
@@ -350,6 +511,12 @@ class Input(Widget):
 
     def on_key(self, key) -> bool:
         k = key.key
+        if k == "__paste__":
+            # 粘贴整段原样插入(保留换行), 不触发提交。沿用 _insert 既有 max_lines 显示行为。
+            self._insert(key.char)
+            if hasattr(self.app, "_on_input_changed"):
+                self.app._on_input_changed(self.value)
+            return True
         if key.is_printable():
             self._insert(key.char)
             if hasattr(self.app, "_on_input_changed"):
@@ -359,9 +526,18 @@ class Input(Widget):
             if key.shift:
                 self._insert("\n")
             else:
+                # 补全浮层激活: Enter 先取选中项回填(残缺前缀 /mod 不当命令提交)
+                sel = getattr(self.app, "_cmd_selectlist", lambda: None)()
+                val = sel.selected_value() if sel is not None else None
+                if val:
+                    self.value = f"/{val} "
+                    self.pos = len(self.value)
                 self.app._input_submitted(self.Submitted(self.value, self))
                 self.clear()
             return True
+        if k == "ctrl+j":
+            # 跨平台稳定换行键(终端解码侧已把裸 \n 归一到 ctrl+j)
+            self._insert("\n"); return True
         if k == "backspace":
             self._delete_back()
             if hasattr(self.app, "_on_input_changed"):
@@ -382,11 +558,19 @@ class Input(Widget):
         if k == "up":
             if hasattr(self.app, "_completion_active") and self.app._completion_active():
                 self.app._completion_move(-1); return True
-            self._move_line(-1); return True
+            if "\n" in self.value:
+                self._move_line(-1)            # 多行: 行移动
+            else:
+                self._history_move(-1)         # 单行: 翻输入历史
+            return True
         if k == "down":
             if hasattr(self.app, "_completion_active") and self.app._completion_active():
                 self.app._completion_move(1); return True
-            self._move_line(1); return True
+            if "\n" in self.value:
+                self._move_line(1)
+            else:
+                self._history_move(1)
+            return True
         if k == "ctrl+a":
             self.pos = self._line_starts()[self._cursor_rc()[0]]; return True
         if k == "ctrl+e":
@@ -418,6 +602,18 @@ class Input(Widget):
             acc += char_width(line[cx]); cx += 1
         self.pos = line_start + cx
 
+    def _history_move(self, d: int) -> None:
+        """单行 up/down 翻输入历史: 回填 value 且 pos 置末尾; 翻到尽头不动。"""
+        n = len(self.history)
+        if d < 0 and self._hist_idx >= n:      # 首次离开实时位 → 暂存草稿
+            self._draft = self.value
+        idx = self._hist_idx + d
+        if idx < 0 or idx > n:                 # 顶到底: 不动
+            return
+        self._hist_idx = idx
+        self.value = self._draft if idx >= n else self.history[idx]
+        self.pos = len(self.value)
+
     def _delete_word(self) -> None:
         i = self.pos
         while i > 0 and self.value[i - 1] == " ":
@@ -443,7 +639,9 @@ class Input(Widget):
                 break
             line = lines[li]
             if not self.value and self.placeholder and r == 0:
-                buf.write_markup(ix, y + 1 + r, f"[dim]{self.placeholder}[/dim]")
+                # base=dim 主题色: [dim] 本身不带 fg, CJK 续占位 cell 会漏 fg=None
+                buf.write_markup(ix, y + 1 + r, f"[dim]{self.placeholder}[/dim]",
+                                 base=self.app.style("dim"))
                 continue
             buf.write(ix, y + 1 + r, line, text_style)
         # 光标(反相)
@@ -457,10 +655,12 @@ class Input(Widget):
             cx_screen = ix + acc
             if cx_screen < x + w - 1:
                 cy = y + 1 + vis_row
-                # 反相该格
+                # 反相该格(主题色互换: fg=page 底, bg=正文 —— 浅色下不再 1.37:1 隐形)
                 cell = buf.grid[cy][cx_screen] if cy < buf.rows and cx_screen < buf.cols else None
                 ch = cell.ch if cell and cell.ch else " "
-                buf.put(cx_screen, cy, ch, Style(fg=(0, 0, 0), bg=(220, 220, 220)))   # 反相光标
+                page = self.app.style("page_bg").fg
+                txt = self.app.style("text").fg
+                buf.put(cx_screen, cy, ch, Style(fg=page, bg=txt))   # 反相光标(主题化)
 
 
 # ── Footer(cwd · session · model · busy) ────────────────────────────────────
@@ -476,15 +676,27 @@ class Footer(Widget):
 
     def draw(self, buf, x, y, w, h) -> None:
         import os
+        # dim 文字一律 base=dim 主题色([dim] 标签本身不带 fg, 全透传终端默认色会糊底)
+        dimst = self.app.style("dim")
         # 第1行: cwd(dim)
         cwd = os.path.basename(os.getcwd()) or os.getcwd()
-        buf.write_markup(x, y, f"[dim] {cwd}[/dim]")
-        # 第2行: 右侧 model · thinking · busy spinner
+        buf.write_markup(x, y, f"[dim] {cwd}[/dim]", base=dimst)
+        # 第2行: 右侧 model · thinking, busy 时前挂 spinner
         model = getattr(self.app, "model_name", "") or ""
         agent = getattr(self.app, "agent", None)
         th = getattr(getattr(agent, "model", None), "thinking_level", None) if agent else None
         right = f"{model} · thinking {th or 'off'}"
         if getattr(self.app, "_agent_busy", False):
+            # busy: spinner 帧用 accent 着色, 整行不再 [dim](旧 dim 把 spinner 压到 <3:1)
             frame = self._SPIN[int(time.time() * 8) % len(self._SPIN)]
-            right = f"{frame} {right}"
-        buf.write_markup(max(x, x + w - len(right) - 1), y + 1, f"[dim]{right}[/dim]")
+            line = f"{frame} {right}"
+            rx = max(x, x + w - len(line) - 1)
+            buf.write(rx, y + 1, frame, self.app.style("accent"))
+            buf.write_markup(rx + 2, y + 1, right, base=self.app.style("text"))
+        else:
+            # idle: 左侧键位提示(busy 时让位给 spinner, 不叠加两套忙碌视觉)。
+            # 先画 hint 再画右侧 model —— 窄屏重叠时右侧状态优先保住
+            buf.write_markup(x, y + 1,
+                             "[dim]/help 帮助 · esc 中断 · ctrl+j 换行[/dim]", base=dimst)
+            buf.write_markup(max(x, x + w - len(right) - 1), y + 1,
+                             f"[dim]{right}[/dim]", base=dimst)

@@ -49,23 +49,27 @@ class Buffer:
 
     def write(self, x: int, y: int, text: str, style: Style) -> int:
         """从 (x,y) 起写一段纯文本(已剥 markup 或本身无 markup)。返回结束列。"""
-        cx = x
-        for ch in text:
-            if cx >= self.cols:
-                break
-            self.put(cx, y, ch, style)
-            cx += char_width(ch) or 1
-        return cx
+        return self.write_segments(x, y, [(text, style)])
 
     def write_segments(self, x: int, y: int, segs: list[tuple[str, Style]]) -> int:
-        """写样式段列表(markup 已 parse)。返回结束列。"""
+        """写样式段列表(markup 已 parse)。返回结束列。
+
+        tab 按 8 列 tab-stop 展开成空格(否则 \t 宽 0 会被 put 静默丢弃);
+        宽 0 字符(组合附标/ZWJ/VS16)不前进列。
+        """
         cx = x
         for text, style in segs:
             for ch in text:
+                if ch == "\t":                   # 跳到下一个 8 的倍数列, 中间填空格
+                    nx = (cx // 8 + 1) * 8
+                    while cx < nx and cx < self.cols:
+                        self.put(cx, y, " ", style)
+                        cx += 1
+                    continue
                 if cx >= self.cols:
                     return cx
                 self.put(cx, y, ch, style)
-                cx += char_width(ch) or 1
+                cx += char_width(ch)             # 宽 0 不前进(旧 `or 1` 是错位根源)
         return cx
 
     def write_markup(self, x: int, y: int, markup: str, base: Style | None = None) -> int:

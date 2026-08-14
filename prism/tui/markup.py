@@ -16,8 +16,17 @@ import unicodedata
 
 
 def char_width(ch: str) -> int:
-    """单字符显示宽度(1 或 2)。控制字符按 0。"""
+    """单字符显示宽度(0/1/2)。控制字符按 0。
+
+    零宽字符也按 0: 组合附标(Mn/Mc/Me, 如 U+0301 重音)与显式零宽集合
+    (ZWJ U+200D / VS16 U+FE0F / ZWSP 系列 / U+2060)——否则 emoji ZWJ 序列
+    会被算出幻影占列, 组合重音会挤乱整行。
+    """
     if not ch or ord(ch) < 32:
+        return 0
+    if unicodedata.category(ch).startswith("M"):
+        return 0
+    if ord(ch) in (0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x2060, 0xFE0E, 0xFE0F):
         return 0
     return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
 
@@ -30,6 +39,32 @@ _COLOR = {
     "accent": (138, 190, 183), "grey": (128, 128, 128), "gray": (128, 128, 128),
     "default": None,
 }
+
+# 浅色主题语义色覆盖: 白底下 yellow/cyan/green/white 原值对比度 <3:1(WCAG 失格,
+# 语义标签「反思/行动/✓/已中断」等同隐形), 重映射到白底 ≥3:1 的深色变体。
+# 仅覆盖这 4 色, 其余随 dark 基色。
+_LIGHT_COLOR_OVERRIDE = {
+    "yellow": (154, 115, 38),   # #9a7326  (≈4.5:1 on white)
+    "cyan": (11, 122, 140),     # #0b7a8c
+    "green": (79, 122, 58),     # #4f7a3a
+    "white": (31, 35, 40),      # #1f2328  (浅色下 white ≈ 正文色)
+}
+# dark 基色备份(切回 dark 时还原被覆盖的 4 色)
+_DARK_COLOR_BACKUP = {k: _COLOR[k] for k in _LIGHT_COLOR_OVERRIDE}
+
+
+def set_color_theme(name: str) -> None:
+    """切换 markup 命名色随主题(由 app.theme setter 调用)。
+
+    dark → 还原 pi dark 基色; light → 覆盖语义 4 色为白底可读变体。
+    ponytail: 模块级全局, 同进程多 app 共享一张解析表 —— 切主题即改全局,
+    调用面零改动(parse_markup 不必传 theme); 多 app 不同主题并发是已知上限。
+    """
+    if name == "light":
+        _COLOR.update(_LIGHT_COLOR_OVERRIDE)
+    else:
+        _COLOR.update(_DARK_COLOR_BACKUP)
+
 
 _STYLE_ATTR = {"bold", "italic", "dim", "underline"}
 
@@ -170,18 +205,42 @@ def parse_markup(text: str) -> list[tuple[str, Style]]:
 
 
 # ── 换行(保留样式) ───────────────────────────────────────────────────────
+def _is_word_char(ch: str) -> bool:
+    """ASCII 词内字符(字母/数字/下划线): 连续段视为不可断 token。"""
+    return ch.isascii() and (ch.isalnum() or ch == "_")
+
+
 def wrap_segments(segs: list[tuple[str, Style]], width: int) -> list[list[tuple[str, Style]]]:
-    """把样式段排成 width 列的若干行(按显示宽度, 支持全宽 CJK)。跨行保留样式。"""
+    """把样式段排成 width 列的若干行(按显示宽度, 支持全宽 CJK)。跨行保留样式。
+
+    greedy word-wrap: ASCII 词不劈开, 整词放不下时挪到下一行(即回溯到词前
+    断点换行); 单词超过整行宽时硬切兜底(字符不丢)。CJK/空格/标点仍任意可断。
+    """
     if width <= 0:
         return [list(segs)] if segs else [[]]
+    chars = [(ch, style) for text, style in segs for ch in text]
     rows: list[list[tuple[str, Style]]] = [[]]
     col = 0
-    for text, style in segs:
-        for ch in text:
-            cw = char_width(ch)
-            if rows[-1] and col + cw > width:   # 放不下且本行非空 → 换行
+    i, n = 0, len(chars)
+    while i < n:
+        if _is_word_char(chars[i][0]):            # 整个 ASCII 词作为一个 token
+            j, w = i, 0
+            while j < n and _is_word_char(chars[j][0]):
+                w += 1
+                j += 1
+            if rows[-1] and col + w > width:      # 放不下 → 整词换行
                 rows.append([]); col = 0
-            rows[-1].append((ch, style)); col += cw
+            for cell in chars[i:j]:               # 超长词在此硬切兜底
+                if rows[-1] and col + 1 > width:
+                    rows.append([]); col = 0
+                rows[-1].append(cell); col += 1
+            i = j
+            continue
+        cw = char_width(chars[i][0])              # CJK/空格/标点: 任意可断(旧行为)
+        if rows[-1] and col + cw > width:         # 放不下且本行非空 → 换行
+            rows.append([]); col = 0
+        rows[-1].append(chars[i]); col += cw
+        i += 1
     return rows
 
 

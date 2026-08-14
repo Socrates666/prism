@@ -7,7 +7,16 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from .tui import App, Header, Input, RichLog, Static, Footer
+
+# 内置指令(无 ext 文件的硬编码实现, 见 _builtin_command): 名 → DESC。
+# 与 self.commands 一起构成 all_commands() 单一事实源。
+BUILTIN_COMMANDS = {
+    "revert": "回退上次文件改动: /revert  (重启生效)",
+    "backups": "查看改动备份栈: /backups  (最近在上)",
+}
 
 
 class PrismApp(App):
@@ -16,10 +25,10 @@ class PrismApp(App):
     CSS = """
 Screen { layout: vertical; }
 #transcript { height: 1fr; border: round $accent; padding: 0 1; }
-#current { height: auto; min-height: 1; padding: 0 1; }
-#status { height: 1; padding: 0 1; color: $accent; }
+#current { height: auto; min-height: 0; max-height: 6; padding: 0 1; color: $text; }
+#status { height: auto; min-height: 0; padding: 0 1; color: $accent; }
 #completion { height: auto; min-height: 0; padding: 0 1; }
-#dock { height: auto; min-height: 3; border: round $accent; padding: 0 1; }
+#dock { height: auto; min-height: 3; padding: 0 1; }
 """
     TITLE = "Prism"
 
@@ -27,6 +36,28 @@ Screen { layout: vertical; }
         super().__init__()
         self.agent = None
         self.commands: dict = {}
+        # busy 引用计数: 主/子 agent 各自 agent_start +1 / agent_end -1,
+        # 子 agent_end 不再把仍在跑的主 agent 抹成 idle(PROBLEM-2)。
+        # _agent_busy 作为同步维护的 bool 供 Esc 判断(shell:42)/刷帧(app:182)读。
+        self._busy_depth = 0
+
+    def _busy_inc(self) -> None:
+        self._busy_depth += 1
+        self._agent_busy = True
+
+    def _busy_dec(self) -> None:
+        # 夹 0 防 drift(重复 agent_end / error 兜底不会跌负)
+        self._busy_depth = max(0, self._busy_depth - 1)
+        self._agent_busy = self._busy_depth > 0
+
+    def all_commands(self) -> dict:
+        """全部指令单一事实源: ext 指令 + 内置 revert/backups → {名: DESC}。
+
+        补全浮层 / 未知指令报错 / /help 三处共用, 防三份清单各自漂移(PROBLEM-1)。
+        """
+        cmds = {n: getattr(m, "DESC", "") for n, m in self.commands.items()}
+        cmds.update(BUILTIN_COMMANDS)
+        return cmds
 
     # ── 布局 ─────────────────────────────────────────────────────────────
     def compose(self):
@@ -34,7 +65,7 @@ Screen { layout: vertical; }
         yield RichLog(id="transcript", wrap=True)
         yield Static(id="current")
         yield Static(id="status")
-        yield Input(id="dock", placeholder="")
+        yield Input(id="dock", placeholder="@Prism 问事 · /help 指令 · 直接输入跑 Python")
         yield Footer(id="footer")
 
     # ── 按键(Esc 中断当前 agent run, 不退出 prism) ────────────────────────
@@ -91,7 +122,7 @@ Screen { layout: vertical; }
         rest = v[1:]
         parts = rest.split()
         prefix = parts[0] if parts else ""
-        cmds = sorted(self.commands.keys()) + ["revert", "backups"]
+        cmds = sorted(self.all_commands())          # 单一事实源, 字典序(含内置 revert/backups)
         from prism.tui.widgets import SelectList
         sl = self._cmd_selectlist()
         if sl is None:                                   # 首次: 建浮层(全量, filter 内部过滤)
@@ -142,6 +173,7 @@ Screen { layout: vertical; }
         reasoning_buf: list[str] = []
         current_buf: list[str] = []
         pending_tool: list = [None]     # 跨 start/end 的工具块引用(cell)
+        started: list = [False]         # 本 agent 是否处 started 未 end 状态(去重 agent_end/error 归位)
 
         # 折射中... 动画(agent 工作时, 输入框正上方)
         import threading as _th
@@ -151,8 +183,10 @@ Screen { layout: vertical; }
             n = 0
             while _status_anim["stop"] and not _status_anim["stop"].is_set():
                 dots = "." * (n % 4)
+                # 无 markup 标签: 颜色由 #status 的 CSS color($accent) 提供,
+                # 与 footer spinner 同色系且随主题(light 下 markup accent 是暗色基值, 会失配)
                 try:
-                    app.call_from_thread(status.update, f"[bold cyan]◇ Refracting[/bold cyan]{dots}")
+                    app.call_from_thread(status.update, f"◇ 折射中{dots}")
                 except Exception:
                     pass
                 n += 1
@@ -180,7 +214,8 @@ Screen { layout: vertical; }
         def flush_current() -> None:
             text = "".join(current_buf)
             if text:
-                app.call_from_thread(log.write, text)
+                # 模型输出是数据不是 markup: 转义 [ 防 arr[0] 被当数字色标签吞掉(围栏由 RichLog 识别)
+                app.call_from_thread(log.write, text.replace("[", "\\["))
             current_buf.clear()
             app.call_from_thread(current.update, "")
 
@@ -193,12 +228,18 @@ Screen { layout: vertical; }
         def emit(event: dict) -> None:
             t = event.get("type")
             if t == "agent_start":
-                app._agent_busy = True
+                started[0] = True
+                app._busy_inc()
                 _start_status()
             elif t in ("agent_end", "steer_interrupt"):
-                app._agent_busy = False
-                _stop_status()
-                app.call_from_thread(log.write, "")   # 回合结束 → 空行分隔下一回合(回合内紧凑)
+                # 仅当本 agent 仍 started 时归位: steer_interrupt 后 run_agent_loop 的
+                # finally 会再发一次 agent_end, 去重避免双扣计数。
+                if started[0]:
+                    started[0] = False
+                    app._busy_dec()
+                    if not app._agent_busy:
+                        _stop_status()
+                    app.call_from_thread(log.write, "")   # 回合结束 → 空行分隔下一回合(回合内紧凑)
             if t == "message_update":
                 flush_reasoning()
                 current_buf.append(event.get("delta", ""))
@@ -206,7 +247,8 @@ Screen { layout: vertical; }
             elif t == "message_end":
                 text = "".join(current_buf)
                 if text:
-                    app.call_from_thread(log.write, text)
+                    # 同 flush_current: 模型输出按字面渲染(转义 [), ``` 围栏由 RichLog 拆段
+                    app.call_from_thread(log.write, text.replace("[", "\\["))
                 current_buf.clear()
                 app.call_from_thread(current.update, "")
             elif t == "reasoning":
@@ -233,20 +275,52 @@ Screen { layout: vertical; }
                 stage = event.get("stage")
                 content = _fmt_result(str(event.get("content", ""))).replace("[", "\\[")
                 app.call_from_thread(log.cognitive, stage, content, event.get("based_on"))
+            elif t == "auto_retry_start":
+                # 重试可见(PROBLEM-4): 动画只说「折射中」, 写一行让用户知道在第几次重试。
+                err = str(event.get("error", ""))
+                if len(err) > 60:
+                    err = err[:59] + "…"
+                app.call_from_thread(log.write,
+                    f"[yellow]↻ 重试 {event.get('attempt', '?')}：{err}[/yellow]")
+            elif t == "auto_retry_end":
+                tail = "放弃" if event.get("gave_up") else "成功"
+                app.call_from_thread(log.write,
+                    f"[yellow]↻ 重试{tail}（共 {event.get('attempts', '?')} 次）[/yellow]")
             elif t == "error":
+                # 兜底归位 busy: 正常路径 run_agent_loop 的 finally 已发 agent_end
+                # (此时 started=False 跳过, 不抹仍在跑的别 agent); 直发 error 时
+                # started 仍 True → 归位计数 + 停动画(防御层)。
+                if started[0]:
+                    started[0] = False
+                    app._busy_dec()
+                    if not app._agent_busy:
+                        _stop_status()
                 flush_current()
+                # 裸异常文本 → 按内容分类给下一步指引(401/超时占大头, PROBLEM-4)
+                err = str(event.get("error", ""))
+                low = err.lower()
+                if "401" in err or "403" in err or "api key" in low or "apikey" in low:
+                    hint = "\n[dim]→ 检查 OPENAI_API_KEY / OPENAI_BASE_URL[/dim]"
+                elif "timeout" in low or "超时" in err:
+                    hint = "\n[dim]→ 网络超时，可重试或 /model 换模型[/dim]"
+                else:
+                    hint = ""
                 app.call_from_thread(
-                    log.write, f"[red bold]✗ error:[/red bold] [red]{event.get('error')}[/red]")
+                    log.write, f"[red bold]✗ 错误：[/red bold] [red]{err}[/red]{hint}")
             elif t == "patch_error":
                 flush_current()
                 app.call_from_thread(
                     log.write,
-                    f"[yellow]⚠ {event.get('phase')}/{event.get('point')}: {event.get('error')} (已降级)[/yellow]")
+                    f"[yellow]⚠ {event.get('phase')}/{event.get('point')}: {event.get('error')} （已降级）[/yellow]")
 
-        # 加载 ext/ + slash 指令
-        from .commands import load_commands
-        load_ext("ext", default_registry, emit=emit)
-        self.commands = load_commands("ext", emit=emit)
+        # 加载 ext/ + slash 指令(根解析不赌 cwd: 包根优先 + PRISM_EXT_DIR 覆盖, PROBLEM-3)
+        from .commands import ext_root, load_commands
+        ext_dir = ext_root()
+        if not (ext_dir / "commands").is_dir():
+            log.write(f"[yellow]⚠ 未找到 ext/ 插件目录（cwd={Path.cwd()}）："
+                      f"指令/agent 配置未加载，请在项目根启动或设 PRISM_EXT_DIR[/yellow]")
+        load_ext(ext_dir, default_registry, emit=emit)
+        self.commands = load_commands(ext_dir, emit=emit)
         from .agent_registry import restore_agents
         main_agent, subs = restore_agents(self, emit)
         if main_agent:
@@ -279,18 +353,9 @@ Screen { layout: vertical; }
             self.agent.namespace[sub.name] = sub
         self.model_name = getattr(self.agent.model, "model", "") or ""
 
-        # 启动 ASCII 艺术(棱镜分光, 每行一色)—— 不打印 banner/tools/cmds
-        _P = ["█████","█   █","█████","█    ","█    "]
-        _R = ["████ ","█   █","████ ","█  █ ","█   █"]
-        _I = ["█████","  █  ","  █  ","  █  ","█████"]
-        _S = ["████ ","█    ","███  ","   █ ","████ "]
-        _M = ["█   █","██ ██","█ █ █","█   █","█   █"]
-        _letters = [_P, _R, _I, _S, _M]
-        _spectrum = ["#ff1744", "#ffd000", "#00ff7b", "#00d4ff", "#c850ff"]   # 鲜艳分光(满饱和)
-        log.write("")
-        for _r in range(5):
-            log.write(f"[{_spectrum[_r]}]" + " ".join(_L[_r] for _L in _letters) + "[/]")
-        log.write("")
+        # 启动横幅: 单行, 主题 accent 色(旧 5 行满饱和字母画占 80×24 屏 37.5%, 已删)
+        _parts = [p for p in ("Prism", self.model_name) if p]
+        log.write(f"[accent]◆ {' · '.join(_parts)} · /help 查看指令[/accent]")
 
     # ── 输入路由(/ · @ · Python) ──────────────────────────────────────────
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -298,7 +363,7 @@ Screen { layout: vertical; }
         if not text.strip():
             return
         log = self.query_one("#transcript")
-        log.user(text)
+        log.user(text.replace("[", "\\["))   # 防 [ 被当 markup 标签吞掉(同 cognitive/tool 路径)
         ns = self.agent.namespace
         stripped = text.strip()
 
@@ -318,8 +383,8 @@ Screen { layout: vertical; }
                 return
             cmd = self.commands.get(name)
             if cmd is None:
-                avail = ['/revert', '/backups'] + ['/' + c for c in sorted(self.commands)]
-                log.write(f"[red]/{name} — 未知指令。可用: {' '.join(avail)}[/]")
+                avail = ['/' + c for c in sorted(self.all_commands())]   # 单一事实源
+                log.write(f"[red]/{name} — 未知指令。可用：{' '.join(avail)}[/]")
             else:
                 try:
                     ctx = {"agent": self.agent, "app": self, "write": lambda m: log.write(m),
@@ -343,7 +408,7 @@ Screen { layout: vertical; }
                 kind = "steer" if getattr(target, "_thread", None) and target.inbox.qsize() > 0 else "followUp"
                 target.inject({"type": "run", "input": msg}, kind=kind)
                 if kind == "steer":
-                    log.write(f"[yellow]⚡ steer → {name}[/yellow]")
+                    log.write(f"[yellow]⚡ 转向 → {name}[/yellow]")
             else:
                 log.write(f"[red]@{name}: 命名空间没有这个 agent[/]")
         else:
@@ -354,6 +419,8 @@ Screen { layout: vertical; }
                     exec(compile(text, "<prism>", "exec"), ns)  # pragma: no cover
             except Exception as e:
                 log.write(f"[red]{type(e).__name__}: {e}[/]")
+                if isinstance(e, (SyntaxError, NameError)):   # 自然语言误入 Python 直通 → 引导出路
+                    log.write("[dim]（这是 Python 直通模式。要问 agent 请用 @Prism <问题>；/help 查看指令）[/dim]")
             for line in buf.getvalue().splitlines():
                 log.write(line)  # pragma: no cover
 
@@ -362,14 +429,14 @@ Screen { layout: vertical; }
         if name == "revert":
             def _r(args):
                 n = revert_latest(self.agent.emit)
-                return f"[green]✓[/] 已回退 {n}(重启生效)" if n else "无改动可回退"
+                return f"[green]✓[/] 已回退 {n}（重启生效）" if n else "无改动可回退"
             return _r
         if name == "backups":
             def _b(args):
                 bf = list_backups()
                 if not bf:
                     return "无备份"
-                return "改动备份栈(最近在上):\n" + "\n".join(
+                return "改动备份栈（最近在上）：\n" + "\n".join(
                     f"  {i+1}. {o} → {b}" for i, (o, b) in enumerate(bf))
             return _b
         return None
@@ -380,20 +447,26 @@ Screen { layout: vertical; }
         app = self
         buf: list[str] = []
         pending: list = [None]
+        started: list = [False]     # 本子 agent 是否处 started 未 end 状态(去重归位)
         tag = f"[{name}] "
 
         def flush() -> None:
             if buf:
-                text = "".join(buf)
+                # 模型输出转义 [(防 markup 吞字, 同主 emit); 围栏由 RichLog 识别, tag 仍走 markup
+                text = "".join(buf).replace("[", "\\[")
                 app.call_from_thread(log.write, f"[dim blue]{tag}[/dim blue]{text}")
                 buf.clear()
 
         def emit(event: dict) -> None:
             t = event.get("type")
             if t == "agent_start":
-                app._agent_busy = True
+                started[0] = True
+                app._busy_inc()
             elif t in ("agent_end", "steer_interrupt"):
-                app._agent_busy = False
+                # 仅当本子 agent 仍 started 时扣计数, 去重(子 end 不抹主 agent busy)。
+                if started[0]:
+                    started[0] = False
+                    app._busy_dec()
             if t == "message_update":
                 buf.append(event.get("delta", ""))
             elif t == "message_end":
@@ -417,9 +490,13 @@ Screen { layout: vertical; }
                 content = _fmt_result(str(event.get("content", ""))).replace("[", "\\[")
                 app.call_from_thread(log.cognitive, stage, f"{tag}{content}", event.get("based_on"))
             elif t == "error":
+                # 兜底归位(同主 emit: finally 已发 agent_end 则 started=False 跳过, 不抹主 agent)。
+                if started[0]:
+                    started[0] = False
+                    app._busy_dec()
                 flush()
                 app.call_from_thread(
-                    log.write, f"[dim blue]│[{name}][/dim blue] [red]error: {event.get('error')}[/red]")
+                    log.write, f"[dim blue]│[{name}][/dim blue] [red]错误：{event.get('error')}[/red]")
         return emit
 
 
@@ -452,23 +529,34 @@ def _fmt_args(args: dict, max_len: int = 60) -> str:
     return ", ".join(parts)
 
 
-def _fmt_result(result: str, max_lines: int = 3, max_chars: int = 150) -> str:
+def _fmt_result(result: str, max_chars: int = 150, head_lines: int = 2, tail_lines: int = 2) -> str:
+    """工具结果压缩: 头 head_lines + 尾 tail_lines(错误/断言/测试汇总都在尾部)。
+
+    中间省略成行数提示; 提示拼在最后且不参与字符预算, 不会被 max_chars 自己吞掉。
+    """
     if not result:
         return ""
     lines = result.strip().split("\n")
-    if len(lines) > max_lines:
-        shown = lines[:max_lines]
-        shown.append(f"  ... ({len(lines) - max_lines} more lines)")
-        text = "\n".join(shown)
-    else:
-        text = "\n".join(lines)
-    if len(text) > max_chars:
-        text = text[:max_chars] + "..."
-    return text
+    hint = ""
+    if len(lines) > head_lines + tail_lines:
+        hint = f"…（还有 {len(lines) - head_lines - tail_lines} 行）"
+        lines = lines[:head_lines] + lines[-tail_lines:]
+    # 超字符预算时头尾行均摊截断(预留换行与提示的额度)
+    if sum(len(l) for l in lines) + len(lines) - 1 + (len(hint) + 1 if hint else 0) > max_chars:
+        per = max(16, (max_chars - len(hint) - len(lines)) // len(lines))
+        lines = [l if len(l) <= per else l[:per - 1] + "…" for l in lines]
+    return "\n".join(lines + ([hint] if hint else []))
 
 
 def main() -> None:
     import os
+    import sys
+    if not os.getenv("OPENAI_API_KEY"):
+        # 无 key 首启兜底: 不让 OpenAI 构造异常在 TUI 一帧未渲染前裸崩 15 行 traceback(PROBLEM-3)。
+        print("未检测到 OPENAI_API_KEY，Prism 需要一个 OpenAI 兼容密钥才能启动。")
+        print("请设置环境变量后再试：export OPENAI_API_KEY=\"你的密钥\"")
+        print("（若走兼容网关，请另设 OPENAI_BASE_URL 指向其地址。）")
+        sys.exit(2)
     if os.environ.get("PRISM_SMOKE"):
         PrismApp().run(headless=True)        # 入口端到端验证: 装配+on_mount, 不进终端
         return

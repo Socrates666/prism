@@ -80,110 +80,113 @@ def run_agent_loop(model, system_prompt: str, user_input: str, tools: list[Tool]
         patches.run_after("emit", ctx_e)
 
     _emit({"type": "agent_start"})
-    _turn = 0
-    while max_turns is None or _turn < max_turns:
-        _turn += 1
-        if abort.is_set():
-            break  # pragma: no cover  (精确时序触发)
-        if steer_check and steer_check():
-            _emit({"type": "steer_interrupt"})
-            break  # steer 插队: 中断当前 run, actor 线程处理 inbox
-        _emit({"type": "turn_start"})
+    # loop 体包 try/finally: 任何 raise(retry 耗尽等)都保证 agent_end 归位,
+    # 否则 UI busy 永转、Esc 失灵、主循环永刷帧、status 线程泄漏(根因修复)。
+    try:
+        _turn = 0
+        while max_turns is None or _turn < max_turns:
+            _turn += 1
+            if abort.is_set():
+                break  # pragma: no cover  (精确时序触发)
+            if steer_check and steer_check():
+                _emit({"type": "steer_interrupt"})
+                break  # steer 插队: 中断当前 run, actor 线程处理 inbox
+            _emit({"type": "turn_start"})
 
-        # ── stream_response 点(before/after) + retry(对齐 pi auto_retry) ──
-        ctx_stream = {"messages": messages, "tools": tools}
-        patches.run_before("stream_response", ctx_stream)
-        _emit({"type": "message_start"})          # 对齐 pi: assistant 消息开始
-        text_parts: list[str] = []
-        tool_calls: list[dict] = []
-        for attempt in range(max_retries + 1):
-            try:
-                for ev in model.chat_stream(ctx_stream["messages"],
-                                            tools=[_to_schema(t) for t in ctx_stream["tools"]]):
-                    if abort.is_set():
-                        break
-                    if ev["type"] == "delta" and ev.get("text"):
-                        text_parts.append(ev["text"])
-                        _emit({"type": "message_update", "delta": ev["text"]})
-                    elif ev["type"] == "reasoning" and ev.get("text"):
-                        _emit({"type": "reasoning", "text": ev["text"]})
-                    elif ev["type"] == "done":
-                        tool_calls = ev.get("tool_calls") or []
-                break  # 成功跳出 retry
-            except Exception as e:
-                text_parts, tool_calls = [], []    # 重置重试
-                if attempt < max_retries:
-                    _emit({"type": "auto_retry_start", "attempt": attempt + 1,
-                           "error": f"{type(e).__name__}: {e}"})
-                    continue
-                _emit({"type": "auto_retry_end", "attempts": attempt + 1, "gave_up": True,
-                       "error": f"{type(e).__name__}: {e}"})
-                raise
-        full_text = "".join(text_parts)
-        _emit({"type": "message_end", "text": full_text})
-        patches.run_after("stream_response", ctx_stream)
-
-        asst: dict = {"role": "assistant", "content": full_text or None}
-        if tool_calls:
-            # 规范化: 喂回 LLM 时每个 tool_call 必须有 type: function(openai 要求)
-            asst["tool_calls"] = [
-                {**tc, "type": "function"} if "type" not in tc else tc
-                for tc in tool_calls
-            ]
-        messages.append(asst)
-
-        # ── should_stop 点(before/after; ctx.stop 可被 before 改) ──
-        ctx_stop = {"messages": messages, "stop": not tool_calls}
-        patches.run_before("should_stop", ctx_stop)
-        patches.run_after("should_stop", ctx_stop)
-
-        if ctx_stop["stop"]:
-            _emit({"type": "turn_end"})
-            break
-
-        # ── execute_tools 点(before/after/around) ──
-        # around 可改/短路/降级: proceed(ctx) 返回 tool messages list
-        def _execute_tool_calls(ctx: dict) -> list[dict]:
-            results: list[dict] = []
-            for tc in ctx["tool_calls"]:
-                if abort.is_set():
-                    break  # pragma: no cover
-                fn = tc.get("function", {})
-                name = fn.get("name", "")
+            # ── stream_response 点(before/after) + retry(对齐 pi auto_retry) ──
+            ctx_stream = {"messages": messages, "tools": tools}
+            patches.run_before("stream_response", ctx_stream)
+            _emit({"type": "message_start"})          # 对齐 pi: assistant 消息开始
+            text_parts: list[str] = []
+            tool_calls: list[dict] = []
+            for attempt in range(max_retries + 1):
                 try:
-                    args = json.loads(fn.get("arguments", "{}") or "{}")
-                except Exception:
-                    args = {}
-                _emit({"type": "tool_execution_start", "tool_name": name, "args": args})
+                    for ev in model.chat_stream(ctx_stream["messages"],
+                                                tools=[_to_schema(t) for t in ctx_stream["tools"]]):
+                        if abort.is_set():
+                            break
+                        if ev["type"] == "delta" and ev.get("text"):
+                            text_parts.append(ev["text"])
+                            _emit({"type": "message_update", "delta": ev["text"]})
+                        elif ev["type"] == "reasoning" and ev.get("text"):
+                            _emit({"type": "reasoning", "text": ev["text"]})
+                        elif ev["type"] == "done":
+                            tool_calls = ev.get("tool_calls") or []
+                    break  # 成功跳出 retry
+                except Exception as e:
+                    text_parts, tool_calls = [], []    # 重置重试
+                    if attempt < max_retries:
+                        _emit({"type": "auto_retry_start", "attempt": attempt + 1,
+                               "error": f"{type(e).__name__}: {e}"})
+                        continue
+                    _emit({"type": "auto_retry_end", "attempts": attempt + 1, "gave_up": True,
+                           "error": f"{type(e).__name__}: {e}"})
+                    raise
+            full_text = "".join(text_parts)
+            _emit({"type": "message_end", "text": full_text})
+            patches.run_after("stream_response", ctx_stream)
 
-                tool = ctx["tool_map"].get(name)
-                if not tool:
-                    result, is_error = f"工具 '{name}' 不存在", True
-                else:
+            asst: dict = {"role": "assistant", "content": full_text or None}
+            if tool_calls:
+                # 规范化: 喂回 LLM 时每个 tool_call 必须有 type: function(openai 要求)
+                asst["tool_calls"] = [
+                    {**tc, "type": "function"} if "type" not in tc else tc
+                    for tc in tool_calls
+                ]
+            messages.append(asst)
+
+            # ── should_stop 点(before/after; ctx.stop 可被 before 改) ──
+            ctx_stop = {"messages": messages, "stop": not tool_calls}
+            patches.run_before("should_stop", ctx_stop)
+            patches.run_after("should_stop", ctx_stop)
+
+            if ctx_stop["stop"]:
+                _emit({"type": "turn_end"})
+                break
+
+            # ── execute_tools 点(before/after/around) ──
+            # around 可改/短路/降级: proceed(ctx) 返回 tool messages list
+            def _execute_tool_calls(ctx: dict) -> list[dict]:
+                results: list[dict] = []
+                for tc in ctx["tool_calls"]:
+                    if abort.is_set():
+                        break  # pragma: no cover
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "")
                     try:
-                        out = tool.execute(args)
-                        if isinstance(out, tuple) and len(out) == 2:
-                            result, is_error = out
-                        else:
-                            result, is_error = out, False
-                    except Exception as e:
-                        result, is_error = f"{type(e).__name__}: {e}", True
+                        args = json.loads(fn.get("arguments", "{}") or "{}")
+                    except Exception:
+                        args = {}
+                    _emit({"type": "tool_execution_start", "tool_name": name, "args": args})
 
-                _emit({"type": "tool_execution_end", "tool_name": name, "result": result, "is_error": is_error})
-                results.append({"role": "tool", "tool_call_id": tc.get("id"), "content": str(result)})
-                if tool and tool.terminate:
-                    ctx["terminate"] = True
-            return results
+                    tool = ctx["tool_map"].get(name)
+                    if not tool:
+                        result, is_error = f"工具 '{name}' 不存在", True
+                    else:
+                        try:
+                            out = tool.execute(args)
+                            if isinstance(out, tuple) and len(out) == 2:
+                                result, is_error = out
+                            else:
+                                result, is_error = out, False
+                        except Exception as e:
+                            result, is_error = f"{type(e).__name__}: {e}", True
 
-        ctx_exec = {"tool_calls": tool_calls, "tool_map": tool_map, "terminate": False}
-        patches.run_before("execute_tools", ctx_exec)
-        tool_msgs = patches.apply_around("execute_tools", ctx_exec, _execute_tool_calls)
-        patches.run_after("execute_tools", ctx_exec)
-        messages.extend(tool_msgs)
+                    _emit({"type": "tool_execution_end", "tool_name": name, "result": result, "is_error": is_error})
+                    results.append({"role": "tool", "tool_call_id": tc.get("id"), "content": str(result)})
+                    if tool and tool.terminate:
+                        ctx["terminate"] = True
+                return results
 
-        _emit({"type": "turn_end"})
-        if ctx_exec.get("terminate"):
-            break
+            ctx_exec = {"tool_calls": tool_calls, "tool_map": tool_map, "terminate": False}
+            patches.run_before("execute_tools", ctx_exec)
+            tool_msgs = patches.apply_around("execute_tools", ctx_exec, _execute_tool_calls)
+            patches.run_after("execute_tools", ctx_exec)
+            messages.extend(tool_msgs)
 
-    _emit({"type": "agent_end"})
+            _emit({"type": "turn_end"})
+            if ctx_exec.get("terminate"):
+                break
+    finally:
+        _emit({"type": "agent_end"})
     return messages

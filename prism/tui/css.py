@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 class ComputedStyle:
     height: tuple[str, int] = ("auto", 0)   # ("fix",n)/("auto",0)/("fr",k)
     min_height: int = 0
+    max_height: int = 0                     # 0 = 无上限(auto widget 内容截断上界)
     border: bool = False
     border_token: str = "accent"
     padding_x: int = 0
@@ -45,6 +46,7 @@ def _merge(a: ComputedStyle, b: ComputedStyle) -> ComputedStyle:
     return ComputedStyle(
         height=b.height if b.height != ("auto", 0) else a.height,
         min_height=b.min_height or a.min_height,
+        max_height=b.max_height or a.max_height,
         border=b.border or a.border,
         border_token=b.border_token if b.border else a.border_token,
         padding_x=b.padding_x if b.padding_x else a.padding_x,
@@ -82,6 +84,8 @@ def parse_css(css: str) -> Stylesheet:
             cs.height = _parse_height(decls["height"])
         if "min-height" in decls:
             cs.min_height = int(decls["min-height"])
+        if "max-height" in decls:
+            cs.max_height = int(decls["max-height"])
         b = decls.get("border", "").strip().lower()
         if b:
             cs.border = b != "none"

@@ -66,7 +66,7 @@ def layout(widgets: list[Widget], styles, total_h: int, width: int) -> list[tupl
                 m = w_.measure(width)
             except Exception:
                 m = 1                       # 扩展 widget measure 抛异常 → 降级, 不炸渲染
-            hgt = max(cs.min_height, m)
+            hgt = max(cs.min_height, min(m, cs.max_height or m))   # max-height 钳制(防流式膨胀撑屏)
             needs.append(hgt)
             fixed_sum += hgt
         else:  # fr
