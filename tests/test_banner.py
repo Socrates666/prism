@@ -31,9 +31,14 @@ def test_b1_art_banner(monkeypatch):
     out = app.render_to_string(24, 80)
     assert "█" in out, "字母画未渲染"
     assert "◆ Prism" in out, "art 模式仍应带单行(可发现性)"
-    fgs = _fgs(_frame(app))
-    for rgb in ((255, 23, 68), (255, 208, 0), (0, 255, 123), (0, 212, 255), (200, 80, 255)):
-        assert rgb in fgs, f"光谱色 {rgb} 缺失"
+    # 逐字符全谱渐变(用户裁决: 颜色分布更细密): 字母画区域 ≥ 30 种不同色(旧版仅 5 色/行)
+    buf = app._drain() or app._render_frame(24, 80)
+    fgs = set()
+    for row in buf.grid:
+        for c in row:
+            if not c.cont and c.ch == "█" and isinstance(c.style.fg, tuple):
+                fgs.add(c.style.fg)
+    assert len(fgs) >= 30, f"渐变细密度不足: 仅 {len(fgs)} 色"
     markup.set_color_theme("dark")
 
 

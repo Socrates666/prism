@@ -374,10 +374,26 @@ Screen { layout: vertical; }
             _S = ["████ ", "█    ", "███  ", "   █ ", "████ "]
             _M = ["█   █", "██ ██", "█ █ █", "█   █", "█   █"]
             _letters = [_P, _R, _I, _S, _M]
-            _spectrum = ["#ff1744", "#ffd000", "#00ff7b", "#00d4ff", "#c850ff"]   # 鲜艳分光(满饱和)
-            log.write("")
+
+            def _hue_hex(t: float) -> str:
+                """t∈[0,1] → 满饱和光谱色(红→橙→黄→绿→青→蓝→紫)。"""
+                import colorsys
+                _r, _g, _b = colorsys.hsv_to_rgb(min(t, 1.0) * 0.84, 1.0, 1.0)
+                return f"{int(_r * 255):02x}{int(_g * 255):02x}{int(_b * 255):02x}"
+
+            # 逐字符全谱渐变(用户裁决: 颜色分布更细密): 每个方块按横向位置取色相,
+            # 行间加相位差 → 棱镜分光的斜向流光(非旧的每行一色 5 条色带)
             for _r in range(5):
-                log.write(f"[{_spectrum[_r]}]" + " ".join(_L[_r] for _L in _letters) + "[/]")
+                _line = " ".join(_L[_r] for _L in _letters)
+                _n = max(1, len(_line) - 1)
+                _segs = []
+                for _i, _ch in enumerate(_line):
+                    if _ch == " ":
+                        _segs.append(" ")
+                    else:
+                        _t = _i / _n * 0.80 + _r * 0.05   # 横向 0→0.80 + 行相位 0.05
+                        _segs.append(f"[#{_hue_hex(_t)}]{_ch}[/]")
+                log.write("".join(_segs))
             _parts = [p for p in ("Prism", self.model_name) if p]
             log.write(f"[accent]◆ {' · '.join(_parts)} · /help 查看指令[/accent]")
 
