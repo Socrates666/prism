@@ -11,21 +11,29 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 
-def _load_env():
-    """读 prism 目录的 .env 填进 os.environ(不覆盖已有)。让 .env 里的 key/url/model 自动生效。"""
+def _load_env(paths=None):
+    """读 .env 填进 os.environ(不覆盖已有)。让 .env 里的 key/url/model 自动生效。
+
+    查找顺序: 包根(仓库根)/.env → 进程 cwd/.env(通用约定, 从任意目录启动该目录的
+    .env 也生效)。.env 被 gitignore 不随 clone/worktree 传播, cwd 兜底让各 checkout
+    只需自备一份。都不存在则静默跳过。
+    """
     import os
     from pathlib import Path
-    env = Path(__file__).resolve().parent.parent / ".env"
-    if not env.exists():
-        return  # pragma: no cover  (.env 在本仓库存在)
-    for line in env.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue  # pragma: no cover  (comment/空行)
-        k, _, v = line.partition("=")
-        k, v = k.strip(), v.strip()
-        if k and k not in os.environ:
-            os.environ[k] = v
+    if paths is None:
+        paths = [Path(__file__).resolve().parent.parent / ".env",
+                 Path.cwd() / ".env"]
+    for env in paths:
+        if not env.is_file():
+            continue
+        for line in env.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue  # pragma: no cover  (comment/空行)
+            k, _, v = line.partition("=")
+            k, v = k.strip(), v.strip()
+            if k and k not in os.environ:
+                os.environ[k] = v
 
 
 _load_env()
