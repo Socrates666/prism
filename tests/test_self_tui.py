@@ -129,7 +129,7 @@ def test_input_multiline_shift_enter():
     inp.on_key(Key(key="enter", char="", shift=True))
     inp.on_key(Key(key="b", char="b"))
     assert inp.value == "a\nb"
-    assert inp.measure(40) >= 4                      # 两行 + 边框
+    assert inp.measure(40) == 2                      # 两行(pi 无边框: 行数即高)
 
 
 def test_input_renders_at_nonzero_y():
@@ -230,9 +230,9 @@ def test_blackbox_render_is_flat_bands():
     ref = log.tool_start("read_file", "path=config.py")
     log.tool_end(ref, "PORT=8080", False)
     out = app.render_to_string(rows=26, cols=50)
-    # 全帧唯一框 = dock 输入框(transcript 边框已按用户裁决移除);
-    # transcript 内部不应再出现嵌套框(扁平色带)
-    assert out.count("╭") == 1 and out.count("╰") == 1
+    # 全帧零边框字符(用户裁决: pi 无边框含输入区); transcript 内部亦无嵌套框
+    assert out.count("╭") == 0 and out.count("╰") == 0
+    assert "❯" in out, "输入区 ❯ 提示符缺失"
     # 用户消息 / 工具名 / 结果都在
     assert "读 config.py" in out
     assert "read_file" in out

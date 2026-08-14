@@ -64,8 +64,8 @@ def test_f2_code_line_has_bg_prose_does_not():
     cbg = {buf.grid[code_row][x].style.bg for x in range(4, 60)}
     assert cbg != {DARK["page_bg"].fg}, "code line has no bg block"
     pbg = {buf.grid[plain_row][x].style.bg for x in range(4, 60)}
-    # page_bg 现已全铺底(REQ-G7): 正文行底色=page 而非 None, 但不得带代码块 bg
-    assert pbg == {DARK["page_bg"].fg}, "prose line unexpectedly has block bg"
+    # 背景透传原生(用户裁决): 正文行底色=None, 但不得带代码块 bg
+    assert pbg == {None}, "prose line unexpectedly has block bg"
 
 
 # [F3] 无围栏纯文本的 [ 不被吞; 未闭合围栏稳态(代码体可见, 围栏标记不泄漏)

@@ -364,14 +364,16 @@ class App:
                 ov["widget"].draw(buf, ov["x"], ov["y"], ov["w"], ov["h"])
             except Exception:  # noqa
                 pass
-        # page_bg 全铺底: widget 多数只写 fg(bg=None 透传终端默认底, 浅暗错配全糊),
-        # 帧尾给所有无底色 cell 补 page_bg —— 消息块/光标等显式 bg 原样保留
-        page = self._page_rgb()
-        if page is not None:
-            for row in buf.grid:
-                for c in row:
-                    if c.style.bg is None:
-                        c.style = replace(c.style, bg=page)
+        # page_bg 铺底默认关闭(用户裁决 2026-08-14: 透传终端原生底色, 显式涂黑与
+        # 原生背景不一致时整帧发灰、右缘出现硬边界)。PRISM_PAGE_BG=paint 恢复全铺
+        # (浅色主题下防 theme fg 与原生底错配时用)。显式色带/光标 bg 原样保留。
+        if os.environ.get("PRISM_PAGE_BG", "").lower() == "paint":
+            page = self._page_rgb()
+            if page is not None:
+                for row in buf.grid:
+                    for c in row:
+                        if c.style.bg is None:
+                            c.style = replace(c.style, bg=page)
         return buf
 
     def show_overlay(self, widget, x: int, y: int, w: int, h: int) -> int:

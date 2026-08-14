@@ -28,7 +28,7 @@ Screen { layout: vertical; }
 #current { height: auto; min-height: 0; max-height: 6; padding: 0 1; color: $text; }
 #status { height: auto; min-height: 0; padding: 0 1; color: $accent; }
 #completion { height: auto; min-height: 0; padding: 0 1; }
-#dock { height: auto; min-height: 3; padding: 0 1; }
+#dock { height: auto; min-height: 1; padding: 0 1; }
 """
     TITLE = "Prism"
 

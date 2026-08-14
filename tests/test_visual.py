@@ -42,32 +42,33 @@ def _contrast(a, b):
     return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 
 
-# [VC1] page_bg 全铺底: 整帧零个 bg=None cell
-def test_vc1_page_bg_painted():
+# [VC1] 背景透传原生(用户裁决): 默认无显式色带处 bg=None; PRISM_PAGE_BG=paint 恢复全铺
+def test_vc1_page_bg_native_passthrough(monkeypatch):
+    monkeypatch.delenv("PRISM_PAGE_BG", raising=False)
     app = _app()
     buf = app._render_frame(24, 80)
-    none_bg = sum(1 for row in buf.grid for c in row if c.style.bg is None)
+    bgs = {c.style.bg for row in buf.grid for c in row}
+    assert None in bgs, "默认应透传原生(bg=None 存在)"
+    monkeypatch.setenv("PRISM_PAGE_BG", "paint")
+    buf2 = app._render_frame(24, 80)
+    none_bg = sum(1 for row in buf2.grid for c in row if c.style.bg is None)
     assert none_bg == 0, none_bg
 
 
-# [VC2] 全帧唯一边框 = 输入框(用户裁决): transcript 无框, ╭ 只出现在 dock 区域且着色
-def test_vc2_only_dock_is_boxed():
+# [VC2] 全帧零边框字符(用户裁决: pi 无边框含输入区), dock 有 ❯ 提示符且着色
+def test_vc2_fully_borderless_input_prompt():
     from prism.tui.widget import layout as _layout
     app = _app()
     buf = app._render_frame(24, 80)
     screen = _screen(buf)
-    assert "╭" in screen and "╰" in screen, "输入框边框未绘制"
+    assert "╭" not in screen and "╰" not in screen, "全帧应零边框字符(含输入区)"
     regions = _layout(app._widgets, app._style_for, 24, 80)
     idx = {(w.id or "").lstrip("#"): regions[i] for i, w in enumerate(app._widgets)}
-    tx0, ty0, tw, th = idx["transcript"]
-    tcells = [c for row in buf.grid[ty0:ty0 + th] for c in row[tx0:tx0 + tw]
-              if not c.cont and c.ch in "╭╮╰╯"]
-    assert not tcells, "transcript 不应有边框(用户裁决: 只留输入框)"
     dx, dy, dw, dh = idx["dock"]
-    dcells = [c for row in buf.grid[dy:dy + dh] for c in row[dx:dx + dw]
-              if not c.cont and c.ch in "╭╮╰╯"]
-    assert dcells and all(isinstance(c.style.fg, tuple) for c in dcells), \
-        "输入框边框未着色"
+    pcells = [c for row in buf.grid[dy:dy + dh] for c in row[dx:dx + dw]
+              if not c.cont and c.ch == "❯"]
+    assert pcells, "输入区应有 ❯ 提示符"
+    assert all(isinstance(c.style.fg, tuple) for c in pcells), "❯ 未着色"
 
 
 # [VC3] 闲置空行归零(#current/#status 空=0 行), status 有内容时按需占 1 行

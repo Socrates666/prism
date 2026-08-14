@@ -475,7 +475,8 @@ class Input(Widget):
 
     def measure(self, width: int) -> int:
         nlines = max(1, self.value.count("\n") + 1)
-        return max(3, min(self.max_lines + 2, nlines + 2))
+        # pi 无边框: 无 box 上下边, 行数即高(用户裁决 2026-08-14)
+        return max(1, min(self.max_lines, nlines))
 
     # ── 光标 ─────────────────────────────────────────────────────────────
     def _cursor_rc(self) -> tuple[int, int]:
@@ -625,9 +626,11 @@ class Input(Widget):
 
     # ── 绘制 ─────────────────────────────────────────────────────────────
     def draw(self, buf, x, y, w, h) -> None:
-        border = self.app.style("editor_border") if self._focused else self.app.style("border_muted")
-        buf.box(x, y, w, h, border_style=border)
-        ix, iw, ih = x + 1, max(1, w - 2), max(1, h - 2)
+        # pi 无边框输入(用户裁决): 无 box, 右/左无轴; 首行 ❯ 提示符(聚焦=editor_border
+        # 色[默认 DeepPink], 失焦=dim), 续行缩进 2 格对齐; 光标反相保持
+        prompt_style = self.app.style("editor_border") if self._focused else self.app.style("dim")
+        buf.write(x, y, "❯", prompt_style)
+        ix, iw, ih = x + 2, max(1, w - 2), max(1, h)
         lines = self.value.split("\n") if self.value else [""]
         # 多行时滚动让光标行可见
         crow, ccol = self._cursor_rc()
@@ -640,10 +643,10 @@ class Input(Widget):
             line = lines[li]
             if not self.value and self.placeholder and r == 0:
                 # base=dim 主题色: [dim] 本身不带 fg, CJK 续占位 cell 会漏 fg=None
-                buf.write_markup(ix, y + 1 + r, f"[dim]{self.placeholder}[/dim]",
+                buf.write_markup(ix, y + r, f"[dim]{self.placeholder}[/dim]",
                                  base=self.app.style("dim"))
                 continue
-            buf.write(ix, y + 1 + r, line, text_style)
+            buf.write(ix, y + r, line, text_style)
         # 光标(反相)
         vis_row = crow - top
         if 0 <= vis_row < ih:
@@ -653,8 +656,8 @@ class Input(Widget):
             while cx < len(line) and acc < ccol:
                 acc += char_width(line[cx]); cx += 1
             cx_screen = ix + acc
-            if cx_screen < x + w - 1:
-                cy = y + 1 + vis_row
+            if cx_screen < x + w:
+                cy = y + vis_row
                 # 反相该格(主题色互换: fg=page 底, bg=正文 —— 浅色下不再 1.37:1 隐形)
                 cell = buf.grid[cy][cx_screen] if cy < buf.rows and cx_screen < buf.cols else None
                 ch = cell.ch if cell and cell.ch else " "
