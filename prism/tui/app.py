@@ -8,6 +8,7 @@
   - ``query_one(sel)`` / ``request_render()`` / ``theme`` / ``style(token)``
 """
 from __future__ import annotations
+import os
 import queue as _q
 import threading
 import time
@@ -46,7 +47,7 @@ DARK = {
     "thinking_bg": _h("282832"), "cognitive_bg": _h("2d2838"),
     "code_bg": _h("1e1e26"),                       # 模型输出代码块背景(比 tool_pending 深, 区隔状态块)
     "page_bg": Style(fg=_h("18181e")),             # 整页铺底色(RGB 存 fg, _page_rgb() 取)
-    "editor_border": Style(fg=_h("8abeb7")),   # 输入框边框随 accent(青灰), 聚焦/失焦只差明度
+    # editor_border 不在表内: style() 实时解析(默认 DeepPink / PRISM_INPUT_BORDER=accent)
 }
 LIGHT = {
     "accent": Style(fg=_h("5a8080")), "primary": Style(fg=_h("547da7")),
@@ -65,7 +66,7 @@ LIGHT = {
     "thinking_bg": _h("e8e8f0"), "cognitive_bg": _h("ede7f6"),
     "code_bg": _h("f0f0f5"),                       # 浅色版代码块背景
     "page_bg": Style(fg=_h("ffffff")),             # 整页铺底色(RGB 存 fg, _page_rgb() 取)
-    "editor_border": Style(fg=_h("5a8080")),   # 浅色版 accent(随主题, 不用玫红)
+    # editor_border 不在表内: style() 实时解析(默认深玫红 d63384 / accent 模式随主题)
 }
 
 
@@ -119,6 +120,12 @@ class App:
         set_color_theme(name)   # markup 命名色随主题(浅色下重映射语义 4 色)
 
     def style(self, token: str) -> Style:
+        if token == "editor_border":
+            # 聚焦输入框边框实时读环境(免 reload 可测/可切):
+            # 默认 DeepPink(pi-faithful); PRISM_INPUT_BORDER=accent 换主题 accent(批判轮 D 方案)
+            if os.environ.get("PRISM_INPUT_BORDER", "").lower() == "accent":
+                return self._themes.get(self._theme, DARK)["accent"]
+            return Style(fg=_h("d63384" if self._theme == "light" else "ff1493"))
         return self._themes.get(self._theme, DARK).get(token, Style())
 
     def _page_rgb(self):

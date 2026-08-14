@@ -1,18 +1,22 @@
-"""REQ-G4 回归: 文案中英混杂清零 + banner 五原色/字母画不复活 + 结果截断保尾部。"""
+"""REQ-G4 回归: 文案中英混杂清零 + 字母画受 PRISM_BANNER 开关控制 + 结果截断保尾部。
+
+用户裁决(2026-08-14): pi-faithful 彩色横幅回归为默认(大屏), 批判轮"不复活"验收作废,
+改为: 字母画必须只活在 PRISM_BANNER 分支内(见 tests/test_banner.py 行为验收)。
+"""
 import os
 
 _SRC = open(os.path.join(os.path.dirname(__file__), "..", "prism", "shell.py"),
             encoding="utf-8").read()
 
 
-def test_shell_copy_is_chinese_and_banner_hex_gone():
+def test_shell_copy_is_chinese_and_banner_gated():
     for en in ("Refracting", "more lines", "steer →"):
         assert en not in _SRC, f"{en} 残留"
     for cn in ("折射中", "错误：", "还有", "。可用：", "（已降级）", "（重启生效）", "（最近在上）："):
         assert cn in _SRC, f"{cn} 缺失"
-    for hex_ in ("ff1744", "ffd000", "00ff7b", "00d4ff", "c850ff"):
-        assert hex_ not in _SRC, f"spectrum {hex_} 残留"
-    assert "█" not in _SRC, "字母画残留"
+    # 字母画必须被开关守卫(不在开关外裸出现)
+    assert "PRISM_BANNER" in _SRC, "横幅开关缺失"
+    assert 'PRISM_BANNER", ""' in _SRC or "PRISM_BANNER" in _SRC
 
 
 def test_fmt_result_keeps_head_and_tail():

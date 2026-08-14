@@ -47,15 +47,20 @@ def _find_fg(buf, chars):
     return found
 
 
-def test_d1_no_deeppink_in_frame():
-    # [D1] 输入框边框不再用 DeepPink / 浅色玫红
+def test_d1_border_pink_default(monkeypatch):
+    # [D1] 用户裁决(2026-08-14): 聚焦边框默认回归 DeepPink(pi-faithful); accent 为退出口
     try:
+        monkeypatch.delenv("PRISM_INPUT_BORDER", raising=False)
         app = PrismApp(); app.run(headless=True)
         app._drain()
         buf = app._render_frame(24, 80)
-        fgs = {c.style.fg for row in buf.grid for c in row}
-        assert (255, 20, 147) not in fgs, "DeepPink still rendered"
-        assert (214, 51, 132) not in fgs, "light pink still rendered"
+        fgs = {c.style.fg for row in buf.grid for c in row if not c.cont}
+        assert (255, 20, 147) in fgs, "默认应渲染 DeepPink 聚焦边框"
+        assert (214, 51, 132) not in fgs, "浅色玫红不应出现在 dark 主题帧"
+        monkeypatch.setenv("PRISM_INPUT_BORDER", "accent")
+        buf2 = app._render_frame(24, 80)
+        fgs2 = {c.style.fg for row in buf2.grid for c in row if not c.cont}
+        assert (255, 20, 147) not in fgs2, "accent 模式不应有粉"
     finally:
         markup.set_color_theme("dark")
 

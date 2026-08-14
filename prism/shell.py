@@ -353,9 +353,33 @@ Screen { layout: vertical; }
             self.agent.namespace[sub.name] = sub
         self.model_name = getattr(self.agent.model, "model", "") or ""
 
-        # 启动横幅: 单行, 主题 accent 色(旧 5 行满饱和字母画占 80×24 屏 37.5%, 已删)
-        _parts = [p for p in ("Prism", self.model_name) if p]
-        log.write(f"[accent]◆ {' · '.join(_parts)} · /help 查看指令[/accent]")
+        # 启动横幅三模式(PRISM_BANNER): art=5 行满饱和分光字母画(pi-faithful 观感, 默认);
+        # line=单行紧凑; off=无。未指定时按屏高自动: <26 行降级 line(5 行画占 80×24 屏 37.5%, 批判轮1已证)
+        _mode = _os.environ.get("PRISM_BANNER", "").lower()
+        if _mode not in ("art", "line", "off"):
+            try:
+                _rows = _os.get_terminal_size().lines
+            except OSError:
+                _rows = 24
+            _mode = "art" if _rows >= 26 else "line"
+        if _mode == "off":
+            pass
+        elif _mode == "line":
+            _parts = [p for p in ("Prism", self.model_name) if p]
+            log.write(f"[accent]◆ {' · '.join(_parts)} · /help 查看指令[/accent]")
+        else:
+            _P = ["█████", "█   █", "█████", "█    ", "█    "]
+            _R = ["████ ", "█   █", "████ ", "█  █ ", "█   █"]
+            _I = ["█████", "  █  ", "  █  ", "  █  ", "█████"]
+            _S = ["████ ", "█    ", "███  ", "   █ ", "████ "]
+            _M = ["█   █", "██ ██", "█ █ █", "█   █", "█   █"]
+            _letters = [_P, _R, _I, _S, _M]
+            _spectrum = ["#ff1744", "#ffd000", "#00ff7b", "#00d4ff", "#c850ff"]   # 鲜艳分光(满饱和)
+            log.write("")
+            for _r in range(5):
+                log.write(f"[{_spectrum[_r]}]" + " ".join(_L[_r] for _L in _letters) + "[/]")
+            _parts = [p for p in ("Prism", self.model_name) if p]
+            log.write(f"[accent]◆ {' · '.join(_parts)} · /help 查看指令[/accent]")
 
     # ── 输入路由(/ · @ · Python) ──────────────────────────────────────────
     def on_input_submitted(self, event: Input.Submitted) -> None:
